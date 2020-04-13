@@ -121,27 +121,30 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
             continue
 
         one_etf_history.drop(columns=['interval'], inplace=True)
+        if 'ticker' not in one_etf_history.columns:
+            one_etf_history['ticker'] = ticker
         # Rename columns to combine all ETFs in the same table
         # Also replace negative values by nans
         rename_dict = {}
 
-        for column in set(one_etf_history.columns) - set(['time', 'interval']):
-            if not isinstance(column, str):
-                negative_price = one_etf_history[column] < 0
-                if len(negative_price):
-                    one_etf_history.loc[negative_price, column] = np.nan
-                    warnings.warn('Some price values were non-positive and were replaced with nans.', RuntimeWarning)
-            rename_dict[column] = f'{ticker}_{column}'
-        one_etf_history.rename(columns=rename_dict, inplace=True)
+        # for column in set(one_etf_history.columns) - set(['time', 'interval']):
+        #     if not isinstance(column, str):
+        #         negative_price = one_etf_history[column] < 0
+        #         if len(negative_price):
+        #             one_etf_history.loc[negative_price, column] = np.nan
+        #             warnings.warn('Some price values were non-positive and were replaced with nans.', RuntimeWarning)
+        #     rename_dict[column] = f'{ticker}_{column}'
+        # one_etf_history.rename(columns=rename_dict, inplace=True)
 
         # Merge into the large table
         if all_etfs_history.empty:
             all_etfs_history = one_etf_history
         else:
-            all_etfs_history = all_etfs_history.merge(one_etf_history, how='outer', on='time')
+            # all_etfs_history = all_etfs_history.merge(one_etf_history, how='outer', on=['time', 'figi'])
+            all_etfs_history = all_etfs_history.append(one_etf_history, ignore_index=True)
 
     # Convert to Moscow time zone (received time is in UTC)
-    # print(all_etfs_history.time.dt.tz_convert(MOSCOW_TIMEZONE))
+    # print(all_etfs_history)
     # all_etfs_history['time'] = all_etfs_history.time.dt.tz_localize(MOSCOW_TIMEZONE)
 
     return all_etfs_history, tickers
@@ -181,7 +184,7 @@ def get_etfs_daily_history(end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(d
             print(f'Server returned an empty reply for the following period: {period}!')
             continue
         dfs.append(df)
-    out = pd.concat(dfs, axis=0)
+    out = pd.concat(dfs, axis=0, ignore_index=True)
     # if len(out) < (end-start) / dt.timedelta(days=1):
     #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v. {(end-start) / dt.timedelta(days=1)}',
     #                   RuntimeWarning)
@@ -224,6 +227,7 @@ class History:
         else:
             self.start_date = None
             self.end_date = None
+
 
     @property
     def data(self):
@@ -329,3 +333,12 @@ class History:
 
         self._data.sort_values(by='time', inplace=True)
         self._save_data()
+
+    def statistics(self):
+        """
+        Print basic statistics such as increase and decrease from 52-week extrema.
+        :return:
+        """
+        filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
+        max_52w = self._data[self._data.time >= filter_52w].groupby(by='figi').max()
+        min_52w = self._data[self._data.time >= filter_52w].groupby(by='figi').max()
