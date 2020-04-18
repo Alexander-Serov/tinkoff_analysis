@@ -35,6 +35,9 @@ import warnings
 import copy
 import numpy as np
 import sys
+from colorama import init, Fore, Style
+
+init()
 
 # Load the token
 token_file = './token_sandbox'
@@ -451,13 +454,12 @@ class History:
                     THRESHOLD_1W_CHG):
                 msg.append(
                     f'{statistics_sorted.loc[figi, "ticker"]:s}\t52w max '
-                    f'change: '
-                    f'{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} '
-                    f'% \tlast week change: '
-                    f'{statistics_sorted.loc[figi, "1w_chg_percent"]:.2f} %'
+                    f'change: {Fore.RED}{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} %{Fore.RESET} '
+                    f'\tlast week change: {Fore.RED}{statistics_sorted.loc[figi, "1w_chg_percent"]:.2f} %'
+                    f'{Fore.RESET}'
                 )
         if len(msg) > 1:
             msg.append('\n==\n')
-            print(*msg, sep = '\n')
+            print(*msg, sep='\n')
         else:
             print('Currently no good opportunities to buy :(')
