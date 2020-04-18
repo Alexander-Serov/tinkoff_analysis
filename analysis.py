@@ -34,6 +34,7 @@ import pytz
 import warnings
 import copy
 import numpy as np
+import sys
 
 # Load the token
 token_file = './token_sandbox'
@@ -42,8 +43,10 @@ with open(token_file, 'r') as f:
 
 LOCAL_TIMEZONE = dt.datetime.now(dt.timezone.utc).astimezone().tzinfo
 MOSCOW_TIMEZONE = pytz.timezone('Europe/Moscow')
-EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(tzinfo=MOSCOW_TIMEZONE)
+EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(
+    tzinfo=MOSCOW_TIMEZONE)
 # TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and sometimes as +3:00. To fix
+obsolete_tickers = ['FXJP', 'FXAU', 'FXUK']
 
 # Initialize the openapi
 client = openapi.sandbox_api_client(token)
@@ -71,7 +74,12 @@ def get_figi_history(figi, start, end, interval):
     df = None
     try:
         # print('C2', start.isoformat(), end.isoformat())
-        hist = market.market_candles_get(figi=figi, _from=start.isoformat(), to=end.isoformat(), interval=interval)
+        hist = market.market_candles_get(figi=figi, _from=start.isoformat(),
+                                         to=end.isoformat(), interval=interval)
+        # print('1', start.isoformat(), end.isoformat(),
+        #       market.market_candles_get(figi=figi,
+        #                                       _from=start.isoformat(),
+        #                                  to=end.isoformat(), interval=interval))
         candles = hist.payload.candles
         candles_dict = [candles[i].to_dict() for i in range(len(candles))]
         df = pd.DataFrame.from_dict(candles_dict)
@@ -81,8 +89,18 @@ def get_figi_history(figi, start, end, interval):
     return df
 
 
+@lru_cache(maxsize=None)
 def get_figi_for_ticker(ticker):
-    return market.market_search_by_ticker_get(ticker).payload.instruments[0].figi
+    return market.market_search_by_ticker_get(ticker).payload.instruments[
+        0].figi
+
+
+@lru_cache(maxsize=None)
+def get_ticker_for_figi(figi):
+    return market.market_search_by_figi_get(figi).payload.ticker
+
+
+obsolete_figis = [get_figi_for_ticker(ticker) for ticker in obsolete_tickers]
 
 
 def get_ticker_history(ticker, start, end, interval):
@@ -100,7 +118,8 @@ def get_ticker_history(ticker, start, end, interval):
 
 
 def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
-                     start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(weeks=52),
+                     start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(
+                         weeks=52),
                      interval='month'):
     """
     Get history _data with a given interval for all available ETFs.
@@ -115,44 +134,40 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
         figi = etf.figi
         ticker = etf.ticker
         tickers.append(ticker)
-        one_etf_history = get_figi_history(figi=figi, start=start, end=end, interval=interval)
-        # print(f'Got {len(one_etf_history)} elements from {start} till {end}')
+        one_etf_history = get_figi_history(figi=figi, start=start, end=end,
+                                           interval=interval)
+
         if one_etf_history.empty:
             continue
+
+        if not one_etf_history.time.is_unique and interval in ['day']:
+            print(ticker, one_etf_history)
+            raise ValueError(f'Received time stamps are not unique for '
+                             f'ticker={ticker} and period=[{start}, {end}]')
 
         one_etf_history.drop(columns=['interval'], inplace=True)
         if 'ticker' not in one_etf_history.columns:
             one_etf_history['ticker'] = ticker
-        # Rename columns to combine all ETFs in the same table
-        # Also replace negative values by nans
-        rename_dict = {}
-
-        # for column in set(one_etf_history.columns) - set(['time', 'interval']):
-        #     if not isinstance(column, str):
-        #         negative_price = one_etf_history[column] < 0
-        #         if len(negative_price):
-        #             one_etf_history.loc[negative_price, column] = np.nan
-        #             warnings.warn('Some price values were non-positive and were replaced with nans.', RuntimeWarning)
-        #     rename_dict[column] = f'{ticker}_{column}'
-        # one_etf_history.rename(columns=rename_dict, inplace=True)
 
         # Merge into the large table
         if all_etfs_history.empty:
             all_etfs_history = one_etf_history
         else:
             # all_etfs_history = all_etfs_history.merge(one_etf_history, how='outer', on=['time', 'figi'])
-            all_etfs_history = all_etfs_history.append(one_etf_history, ignore_index=True)
-
-    # Convert to Moscow time zone (received time is in UTC)
-    # print(all_etfs_history)
-    # all_etfs_history['time'] = all_etfs_history.time.dt.tz_localize(MOSCOW_TIMEZONE)
+            all_etfs_history = all_etfs_history.append(one_etf_history,
+                                                       ignore_index=True)
 
     return all_etfs_history, tickers
 
 
-def get_etfs_daily_history(end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
-                           start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1)):
+def get_etfs_daily_history(
+        end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
+        start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52,
+                                                              days=1)):
     """
+    Get daily market history (1 point per day) in exactly the requested interval.
+
+    Note:
     Due to API restrictions, an interval longer than a year must be divided into years when fetched
     """
     interval = 'day'
@@ -173,18 +188,25 @@ def get_etfs_daily_history(end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(d
     one_period = dt.timedelta(weeks=52)
     need_divide = length > one_period
     n_periods = int(math.ceil(length / one_period))
-    periods = [[end - one_period * (i + 1), end - one_period * i] for i in range(n_periods)]
+    periods = [[end - one_period * (i + 1), end - one_period * i] for i in
+               range(n_periods)]
     periods[-1][0] = start
     periods = periods[::-1]
 
     dfs = []
-    for period in tqdm(periods, desc=f'Getting forecast with interval={interval}'):
-        df, tickers = get_etfs_history(start=period[0], end=period[1], interval=interval)
+    for period in tqdm(periods,
+                       desc=f'Getting forecast with interval={interval}'):
+        df, tickers = get_etfs_history(start=period[0], end=period[1],
+                                       interval=interval)
         if df.empty:
-            print(f'Server returned an empty reply for the following period: {period}!')
+            print(
+                f'Server returned an empty reply for the following period: {period}!')
             continue
         dfs.append(df)
-    out = pd.concat(dfs, axis=0, ignore_index=True)
+    if dfs:
+        out = pd.concat(dfs, axis=0, ignore_index=True)
+    else:
+        out, tickers = None, None
     # if len(out) < (end-start) / dt.timedelta(days=1):
     #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v. {(end-start) / dt.timedelta(days=1)}',
     #                   RuntimeWarning)
@@ -200,6 +222,24 @@ def get_etfs_daily_history(end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(d
     # out.drop(pd.isna(out.time).index, inplace=True)
 
     return out, tickers
+
+
+def get_current_price(figi: str):
+    """
+    If the market is open, return the lowest `ask` price for the given figi.
+    Otherwise, return the close price of the last trading day.
+    :param figi:
+    :return:
+    """
+    ans = market.market_orderbook_get(figi=figi, depth=1)
+    payload = ans.payload
+    if payload.trade_status == 'NotAvailableForTrading':
+        current_price = payload.close_price
+    else:
+        current_price = payload.asks[0]
+        # TODO not tested
+
+    return current_price
 
 
 class History:
@@ -221,13 +261,14 @@ class History:
         self._tickers = []
         self._load_data()
 
+    @property
+    def last_date(self):
         if not self._data.empty:
-            self.start_date = self._data.time.min()
-            self.end_date = self._data.time.max()
+            last_date = self._data.time.max()
         else:
-            self.start_date = None
-            self.end_date = None
+            last_date = None
 
+        return last_date
 
     @property
     def data(self):
@@ -253,12 +294,13 @@ class History:
         return loaded
 
     def _save_data(self):
-        tmp_filename = self.data_file + '.tmp'
+        tmp_data_file = self.data_file + '.tmp'
+        tmp_tickers_file = self.tickers_file + '.tmp'
         success = False
         # Save to another file
         try:
-            self._data.to_csv(tmp_filename, index=False)
-            with open(self.tickers_file, 'w') as f:
+            self._data.to_csv(tmp_data_file, index=False)
+            with open(tmp_tickers_file, 'w') as f:
                 for ticker in self._tickers:
                     f.write(ticker + '\n')
             success = True
@@ -266,79 +308,156 @@ class History:
             print('Unable to save ETFs history')
             raise e
 
-        # Replace the  original file
+        # Replace the original files
         if success:
-            try:
-                os.unlink(self.data_file)
-            except FileNotFoundError:
-                pass
+            for tmp_file, file in [(tmp_data_file, self.data_file),
+                                   (tmp_tickers_file, self.tickers_file)]:
+                try:
+                    os.unlink(file)
+                except FileNotFoundError:
+                    pass
 
-            try:
-                os.rename(tmp_filename, self.data_file)
-            except Exception as e:
-                success = False
-                raise e
+                try:
+                    os.rename(tmp_file, file)
+                except Exception as e:
+                    success = False
+                    raise e
 
         return success
 
-    def update(self, reload=False):
+    def update(self, reload=False, verbose=False):
         """
-        Fetch the latest _data from server up to yesterday.
+        Fetch the latest _data from server starting from 2 last known days.
         :return:
         """
-        today = dt.datetime.now(LOCAL_TIMEZONE)
-        # If _data were loaded, only fetch _data for the missing period
+        today = dt.datetime.now(MOSCOW_TIMEZONE)
+        # If _data have been loaded, only fetch data starting with the last
+        # date in the database
         if self._data.empty or reload:
             start_date = EARLIEST_DATE
         else:
-            start_date = self.end_date
-        # print(start_date, today)
-        # if start_date >= today:
-        #     print('Data already up to date')
-        #     return
+            start_date = self.last_date - dt.timedelta(days=1)
 
-        df, self._tickers = get_etfs_daily_history(start=start_date, end=today)
-        # print('A3', df.time.tail(1))
+        if verbose:
+            print(f'Updating historical data starting from {start_date}')
 
+        new_data, tickers = get_etfs_daily_history(start=start_date, end=today)
+        if new_data is None or new_data.empty:
+            raise RuntimeError(
+                'The received data frame cannot be empty because one of the '
+                'dates was already present in the history data')
+
+        self._tickers = tickers
         if self._data.empty or reload:
-            self._data = df
+            self._data = new_data
         else:
-            # try:
-            # print(f'Range old: [{self._data.time.min()}, {self._data.time.max()}] and new: [{df.time.min()}, {df.time.max()}]')
-            # print(self._data)
-            # print(df)
-            # Drop all data from the original table that repeats in the new one
-            merged = copy.deepcopy(self._data)
-            # print('A3', df.tail(), df.time.min())
-            # print('A5:', df.index)
-            # print('A8', df.time.tail(), merged.time.tail())
-            # print('B1', merged.time >= df.time.min())
-            # print('A6', np.any(merged.time >= df.time.min()), len(merged.loc[merged.time >= df.time.min()]))
-            # print('A7')
-            # print('A4', merged.loc[merged.time >= df.time.min()].index)
-            merged.drop(merged[merged.time >= df.time.min()].index, inplace=True)
-            # print(merged.tail())
+            """Drop all data from the original table that repeats in the new 
+            one """
+            old_data = copy.deepcopy(self._data)
+            old_data.drop(old_data[old_data.time >= new_data.time.min()].index,
+                          inplace=True)
 
-            merged = merged.append(df, verify_integrity=True, ignore_index=True)
-            # print(merged.tail())
-            merged.time = pd.to_datetime(
-                self._data.time)  # the time column converts to object althouth there are no nans
-            # print(merged)
+            merged = old_data.append(new_data, verify_integrity=True,
+                                     ignore_index=True)
+            # Convert the time column to time because after merge it changes
+            # to object
+            merged.time = pd.to_datetime(self._data.time)
             self._data = merged
-            # print('A4', self._data.time.dtype)
-            # print(self._data)
-            print('History data updated successfully!')
-            # except Exception as e:
-            #     print('Unable to update the _data table')
+            print(f'History data updated successfully since {start_date}!')
 
         self._data.sort_values(by='time', inplace=True)
         self._save_data()
 
-    def statistics(self):
+    def statistics(self, position='c'):
         """
-        Print basic statistics such as increase and decrease from 52-week extrema.
-        :return:
+        Print basic statistics such as increase and decrease from 52-week
+        extrema.
+        :param position what time of day (o, c, h, l) to use to
+        assign a value to a day :return:
         """
+        figis = self._data.figi.unique()
+
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
-        max_52w = self._data[self._data.time >= filter_52w].groupby(by='figi').max()
-        min_52w = self._data[self._data.time >= filter_52w].groupby(by='figi').max()
+        filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
+
+        statistics = {'current':
+                          {figi: get_current_price(figi) for figi
+                           in figis},
+                      'max_52w': self._data[self._data.time >=
+                                            filter_52w].groupby(
+                          by='figi').max()[position].to_dict(),
+                      'min_52w': self._data[self._data.time >=
+                                            filter_52w].groupby(
+                          by='figi').min()[position].to_dict(),
+                      'max_1w':
+                          self._data[self._data.time >= filter_1w].groupby(
+                              by='figi').max()[position].to_dict(),
+                      'min_1w':
+                          self._data[self._data.time >= filter_1w].groupby(
+                              by='figi').min()[position].to_dict(),
+                      '1w':
+                          self._data[self._data.time >= filter_1w].groupby(
+                              by='figi').first()[position].to_dict()
+                      }
+        # print(self._data[self._data.time >= filter_1w].groupby(
+        #                       by='figi'))
+        # print(self._data[self._data.ticker == 'FXUS'].time.unique())
+
+        # print(max_52w)
+
+        # current_prices_df = pd.DataFrame.from_dict(current_prices)
+        # print(current_prices_df)
+
+        # Combine the statistics together
+        statistics_df = pd.DataFrame(index=figis)
+        statistics_df.index.name = 'figi'
+        statistics_df['ticker'] = statistics_df.index.map(get_ticker_for_figi)
+        for key, value in statistics.items():
+            if (set(figis) - set(value.keys()) - set(obsolete_figis)):
+                warnings.warn(f'Not all figis were found for the column `'
+                              f'{key}`. The analysis may be incorrect.')
+            statistics_df[key] = statistics_df.index.map(value)
+            if key != 'current':
+                statistics_df[key + '_chg'] = (statistics_df['current'] -
+                                               statistics_df[key]) / \
+                                              statistics_df[key]
+
+                statistics_df[key + '_chg_percent'] = (statistics_df[
+                                                           'current'] -
+                                                       statistics_df[key]) / \
+                                                      statistics_df[key] * 100
+
+        # print(statistics_df)
+        # statistics_df.to_csv('tmp.csv')
+        return statistics_df
+
+    def recommend_simple(self):
+        self.update()
+        statistics_df = self.statistics()
+
+        # Print recommendation according to current strategy
+        # TODO formalize strategies into a separate class or functions
+        statistics_sorted = statistics_df.sort_values('max_52w_chg_percent')
+        THRESHOLD_MAX_52W_CHG_PERCENT = -10
+        THRESHOLD_1W_CHG = -1e-8
+        msg = [f'\n==\nGood opportunities to buy (criteria: * 52w change <= '
+               f'{THRESHOLD_MAX_52W_CHG_PERCENT} %, * 1w change <= '
+               f'{THRESHOLD_1W_CHG:.2f}):']
+        for figi in statistics_sorted.index:
+            # filt = statistics_sorted.index == figi
+            if (statistics_sorted.loc[figi, 'max_52w_chg_percent'] <=
+                    THRESHOLD_MAX_52W_CHG_PERCENT
+                    and statistics_sorted.loc[figi, '1w_chg'] <=
+                    THRESHOLD_1W_CHG):
+                msg.append(
+                    f'{statistics_sorted.loc[figi, "ticker"]:s}\t52w max '
+                    f'change: '
+                    f'{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} '
+                    f'% \tlast week change: '
+                    f'{statistics_sorted.loc[figi, "1w_chg_percent"]:.2f} %'
+                )
+        if len(msg) > 1:
+            msg.append('\n==\n')
+            print(*msg, sep = '\n')
+        else:
+            print('Currently no good opportunities to buy :(')
