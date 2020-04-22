@@ -36,11 +36,13 @@ import copy
 import numpy as np
 import sys
 from colorama import init, Fore, Style
+import pathlib
 
 init()
 
 # Load the token
-token_file = './token_sandbox'
+main_folder = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
+token_file = main_folder / './token_sandbox'
 with open(token_file, 'r') as f:
     token = f.read().strip()
 
@@ -92,13 +94,13 @@ def get_figi_history(figi, start, end, interval):
     return df
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1000)
 def get_figi_for_ticker(ticker):
     return market.market_search_by_ticker_get(ticker).payload.instruments[
         0].figi
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=1000)
 def get_ticker_for_figi(figi):
     return market.market_search_by_figi_get(figi).payload.ticker
 
@@ -239,7 +241,10 @@ def get_current_price(figi: str):
     if payload.trade_status == 'NotAvailableForTrading':
         current_price = payload.close_price
     else:
-        current_price = payload.asks[0]
+        order_response = payload.asks[0]
+        # print('debug-1', get_ticker_for_figi(figi), order_response)
+        current_price = order_response.price
+
         # TODO not tested
 
     return current_price
@@ -258,8 +263,8 @@ class History:
 
     def __init__(self, interval='day'):
         self.interval = interval
-        self.data_file = f'ETFs_history_i={interval}.csv'
-        self.tickers_file = f'tickers_i={interval}.dat'
+        self.data_file = main_folder / f'ETFs_history_i={interval}.csv'
+        self.tickers_file = main_folder / f'tickers_i={interval}.dat'
         self._data = pd.DataFrame()
         self._tickers = []
         self._load_data()
@@ -297,8 +302,8 @@ class History:
         return loaded
 
     def _save_data(self):
-        tmp_data_file = self.data_file + '.tmp'
-        tmp_tickers_file = self.tickers_file + '.tmp'
+        tmp_data_file = self.data_file.with_suffix('.tmp')
+        tmp_tickers_file = self.tickers_file.with_suffix('.tmp')
         success = False
         # Save to another file
         try:
@@ -371,9 +376,9 @@ class History:
         self._data.sort_values(by='time', inplace=True)
         self._save_data()
 
-    def statistics(self, position='c'):
+    def calculate_statistics(self, position='c'):
         """
-        Print basic statistics such as increase and decrease from 52-week
+        Print basic calculate_statistics such as increase and decrease from 52-week
         extrema.
         :param position what time of day (o, c, h, l) to use to
         assign a value to a day :return:
@@ -382,6 +387,7 @@ class History:
 
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
         filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
+        filter_1d = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(days=1)
 
         statistics = {'current':
                           {figi: get_current_price(figi) for figi
@@ -400,7 +406,10 @@ class History:
                               by='figi').min()[position].to_dict(),
                       '1w':
                           self._data[self._data.time >= filter_1w].groupby(
-                              by='figi').first()[position].to_dict()
+                              by='figi').first()[position].to_dict(),
+                      '1d':
+                          self._data[self._data.time <= filter_1d].groupby(
+                              by='figi').last()[position].to_dict()
                       }
         # print(self._data[self._data.time >= filter_1w].groupby(
         #                       by='figi'))
@@ -411,7 +420,7 @@ class History:
         # current_prices_df = pd.DataFrame.from_dict(current_prices)
         # print(current_prices_df)
 
-        # Combine the statistics together
+        # Combine the calculate_statistics together
         statistics_df = pd.DataFrame(index=figis)
         statistics_df.index.name = 'figi'
         statistics_df['ticker'] = statistics_df.index.map(get_ticker_for_figi)
@@ -436,15 +445,15 @@ class History:
 
     def recommend_simple(self):
         self.update()
-        statistics_df = self.statistics()
+        statistics_df = self.calculate_statistics()
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
         statistics_sorted = statistics_df.sort_values('max_52w_chg_percent')
         THRESHOLD_MAX_52W_CHG_PERCENT = -10
         THRESHOLD_1W_CHG = -1e-8
-        msg = [f'\n==\nGood opportunities to buy (criteria: * 52w change <= '
-               f'{THRESHOLD_MAX_52W_CHG_PERCENT} %, * 1w change <= '
+        msg = [f'\n==\nGood opportunities to buy (criteria: i. 52w change <= '
+               f'{THRESHOLD_MAX_52W_CHG_PERCENT} %, ii. 1w change <= '
                f'{THRESHOLD_1W_CHG:.2f}):']
         for figi in statistics_sorted.index:
             # filt = statistics_sorted.index == figi
@@ -463,3 +472,37 @@ class History:
             print(*msg, sep='\n')
         else:
             print('Currently no good opportunities to buy :(')
+        warnings.warn('The output values have not been verified', UserWarning)
+
+    def recommend_other(self):
+        self.update()
+        statistics_df = self.calculate_statistics()
+
+        # Print recommendation according to current strategy
+        # TODO formalize strategies into a separate class or functions
+        statistics_sorted = statistics_df.sort_values('max_52w_chg_percent')
+        THRESHOLD_MAX_52W_CHG_PERCENT = -10
+        THRESHOLD_1D_CHG = -1e-8
+        msg = [f'\n==\nGood opportunities to buy (criteria: i. 52w change <= '
+               f'{THRESHOLD_MAX_52W_CHG_PERCENT} %, ii. previous day change <= '
+               f'{THRESHOLD_1D_CHG:.2f}):']
+        for figi in statistics_sorted.index:
+            # filt = statistics_sorted.index == figi
+            if (statistics_sorted.loc[figi, 'max_52w_chg_percent'] <=
+                    THRESHOLD_MAX_52W_CHG_PERCENT
+                    and statistics_sorted.loc[figi, '1d_chg'] <=
+                    THRESHOLD_1D_CHG):
+                msg.append(
+                    f'{statistics_sorted.loc[figi, "ticker"]:s}\t52w max '
+                    f'change: {Fore.RED}{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} %{Fore.RESET} '
+                    f'\tprevious day change: {Fore.RED}'
+                    f'{statistics_sorted.loc[figi, "1d_chg_percent"]:.2f} %'
+                    f'{Fore.RESET}'
+                )
+        if len(msg) > 1:
+            msg.append('\n==\n')
+            print(*msg, sep='\n')
+        else:
+            print('Currently no good opportunities to buy :(')
+
+        warnings.warn('The output values have not been verified', UserWarning)
