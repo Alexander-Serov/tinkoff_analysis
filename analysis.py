@@ -17,8 +17,10 @@ Candle limits:
 // - week [7 days, 2 years]
 // - month [1 month, 10 years]
 """
+import time
 
 from openapi_client import openapi
+from openapi_genclient.exceptions import ApiException
 import datetime as dt
 from pytz import timezone
 import os
@@ -35,10 +37,11 @@ import warnings
 import copy
 import numpy as np
 import sys
-from colorama import init, Fore, Style
+import colorama
+from colorama import Fore, Style
 import pathlib
 
-init()
+colorama.init()
 
 # Load the token
 main_folder = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
@@ -52,6 +55,7 @@ EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(
     tzinfo=MOSCOW_TIMEZONE)
 # TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and sometimes as +3:00. To fix
 obsolete_tickers = ['FXJP', 'FXAU', 'FXUK']
+logfile = 'log.log'
 
 # Initialize the openapi
 client = openapi.sandbox_api_client(token)
@@ -65,6 +69,19 @@ def get_all_etfs(reload=False):
 
 
 get_all_etfs.etfs = None
+
+def log_to_file(*args):
+    try:
+        with open(logfile, 'a') as f:
+            f.write(str(time.time()))
+            for arg in args:
+                f.write(str(arg))
+    except Exception as e:
+        print('Unable to save the following thing to log:')
+        print(args)
+        # raise e
+
+
 
 
 def get_figi_history(figi, start, end, interval):
@@ -89,20 +106,31 @@ def get_figi_history(figi, start, end, interval):
         candles_dict = [candles[i].to_dict() for i in range(len(candles))]
         df = pd.DataFrame.from_dict(candles_dict)
     except Exception as e:
-        print(f'Unable to load history for figi={figi}')
-        print(e)
+        log_to_file(f'Unable to load history for figi={figi}')
+        log_to_file(e)
     return df
 
 
 @lru_cache(maxsize=1000)
 def get_figi_for_ticker(ticker):
-    return market.market_search_by_ticker_get(ticker).payload.instruments[
-        0].figi
+    res = market.market_search_by_ticker_get(ticker).payload.instruments
+    if res:
+        figi = res[0].figi
+    else:
+        figi = None
+    return figi
 
 
 @lru_cache(maxsize=1000)
 def get_ticker_for_figi(figi):
-    return market.market_search_by_figi_get(figi).payload.ticker
+    try:
+        return market.market_search_by_figi_get(figi).payload.ticker
+    except ApiException as e:
+        log_to_file(f'Unable to get ticker for figi={figi}.')
+        log_to_file(str(e))
+        return None
+
+
 
 
 obsolete_figis = [get_figi_for_ticker(ticker) for ticker in obsolete_tickers]
@@ -236,7 +264,12 @@ def get_current_price(figi: str):
     :param figi:
     :return:
     """
-    ans = market.market_orderbook_get(figi=figi, depth=1)
+    try:
+        ans = market.market_orderbook_get(figi=figi, depth=1)
+    except ApiException as e:
+        log_to_file(f'Unable to get current price for figi={figi}.')
+        log_to_file(str(e))
+        return np.nan
     payload = ans.payload
     if payload.trade_status == 'NotAvailableForTrading':
         current_price = payload.close_price
@@ -443,8 +476,9 @@ class History:
         # statistics_df.to_csv('tmp.csv')
         return statistics_df
 
-    def recommend_simple(self):
-        self.update()
+    def recommend_simple(self, update: bool = True):
+        if update:
+            self.update()
         statistics_df = self.calculate_statistics()
 
         # Print recommendation according to current strategy
@@ -474,8 +508,9 @@ class History:
             print('Currently no good opportunities to buy :(')
         warnings.warn('The output values have not been verified', UserWarning)
 
-    def recommend_other(self):
-        self.update()
+    def recommend_other(self, update: bool = True):
+        if update:
+            self.update()
         statistics_df = self.calculate_statistics()
 
         # Print recommendation according to current strategy
