@@ -17,6 +17,7 @@ Candle limits:
 // - week [7 days, 2 years]
 // - month [1 month, 10 years]
 """
+import inspect
 import time
 
 from openapi_client import openapi
@@ -54,7 +55,7 @@ MOSCOW_TIMEZONE = pytz.timezone('Europe/Moscow')
 EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(
     tzinfo=MOSCOW_TIMEZONE)
 # TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and sometimes as +3:00. To fix
-obsolete_tickers = ['FXJP', 'FXAU', 'FXUK']
+obsolete_tickers = {'FXJP': 'BBG005HM5979', 'FXAU': 'BBG005HM6BL7', 'FXUK': 'BBG005HLK5V5'}
 logfile = 'log.log'
 
 # Initialize the openapi
@@ -70,18 +71,21 @@ def get_all_etfs(reload=False):
 
 get_all_etfs.etfs = None
 
+
 def log_to_file(*args):
+    curframe = inspect.currentframe()
+    calframe = inspect.getouterframes(curframe, 2)
+    caller = calframe[1][3]
     try:
         with open(logfile, 'a') as f:
-            f.write(str(time.time()))
+            f.write(str(dt.datetime.now()) + f' function: {caller}\n')
             for arg in args:
                 f.write(str(arg))
+            f.write('\n\n')
     except Exception as e:
         print('Unable to save the following thing to log:')
         print(args)
         # raise e
-
-
 
 
 def get_figi_history(figi, start, end, interval):
@@ -106,8 +110,9 @@ def get_figi_history(figi, start, end, interval):
         candles_dict = [candles[i].to_dict() for i in range(len(candles))]
         df = pd.DataFrame.from_dict(candles_dict)
     except Exception as e:
-        log_to_file(f'Unable to load history for figi={figi}')
-        log_to_file(e)
+        if figi not in obsolete_tickers.values():
+            log_to_file(f'Unable to load history for figi={figi}')
+            log_to_file(e)
     return df
 
 
@@ -123,17 +128,14 @@ def get_figi_for_ticker(ticker):
 
 @lru_cache(maxsize=1000)
 def get_ticker_for_figi(figi):
+    if figi in obsolete_tickers.values():
+        return None
     try:
         return market.market_search_by_figi_get(figi).payload.ticker
     except ApiException as e:
         log_to_file(f'Unable to get ticker for figi={figi}.')
         log_to_file(str(e))
         return None
-
-
-
-
-obsolete_figis = [get_figi_for_ticker(ticker) for ticker in obsolete_tickers]
 
 
 def get_ticker_history(ticker, start, end, interval):
@@ -205,6 +207,7 @@ def get_etfs_daily_history(
     """
     interval = 'day'
     interval_dt = dt.timedelta(days=1)
+    print(f'Requesting ETF history from {start} till {end} with an interval={interval}')
 
     # For daily forecasts drop hours
     # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
@@ -249,10 +252,14 @@ def get_etfs_daily_history(
     # if len(inds) > 0:
     #     out.drop(inds.index, inplace=True)
 
-    # # Drop nans in time
+    # Drop nans in time
     # print(out[pd.isna(out.time)])
     # print(out.tail(1))
-    # out.drop(pd.isna(out.time).index, inplace=True)
+
+    l1 = len(out)
+    out.drop(out[pd.isna(out.time)].index, inplace=True)
+    if len(out) < l1:
+        log_to_file(f'{l1 - len(out)} NaN time stamps dropped.')
 
     return out, tickers
 
@@ -264,6 +271,9 @@ def get_current_price(figi: str):
     :param figi:
     :return:
     """
+    if figi in obsolete_tickers.values():
+        return np.nan
+
     try:
         ans = market.market_orderbook_get(figi=figi, depth=1)
     except ApiException as e:
@@ -324,6 +334,13 @@ class History:
         # print('Loading local history _data...')
         try:
             self._data = pd.read_csv(self.data_file)
+
+            # Drop nans in time stamps
+            l1 = len(self._data)
+            self._data.drop(self._data[pd.isna(self._data.time)].index, inplace=True)
+            if len(self._data) < l1:
+                log_to_file(f'{l1 - len(self._data)} NaN time stamps dropped.')
+
             self._data.time = pd.to_datetime(self._data.time)
             with open(self.tickers_file, 'r') as f:
                 self._tickers = f.read().split()
@@ -385,8 +402,8 @@ class History:
         new_data, tickers = get_etfs_daily_history(start=start_date, end=today)
         if new_data is None or new_data.empty:
             raise RuntimeError(
-                'The received data frame cannot be empty because one of the '
-                'dates was already present in the history data')
+                f'The received data frame cannot be empty because one of the '
+                f'dates was already present in the history data. Requested dates: {start_date} -- {today}.')
 
         self._tickers = tickers
         if self._data.empty or reload:
@@ -428,6 +445,9 @@ class History:
                       'max_52w': self._data[self._data.time >=
                                             filter_52w].groupby(
                           by='figi').max()[position].to_dict(),
+                      'max_52w-10%': (self._data[self._data.time >=
+                                                filter_52w].groupby(
+                          by='figi').max()[position] * 0.9).to_dict(),
                       'min_52w': self._data[self._data.time >=
                                             filter_52w].groupby(
                           by='figi').min()[position].to_dict(),
@@ -458,7 +478,7 @@ class History:
         statistics_df.index.name = 'figi'
         statistics_df['ticker'] = statistics_df.index.map(get_ticker_for_figi)
         for key, value in statistics.items():
-            if (set(figis) - set(value.keys()) - set(obsolete_figis)):
+            if (set(figis) - set(value.keys()) - set(obsolete_tickers.values())):
                 warnings.warn(f'Not all figis were found for the column `'
                               f'{key}`. The analysis may be incorrect.')
             statistics_df[key] = statistics_df.index.map(value)
@@ -474,12 +494,16 @@ class History:
 
         # print(statistics_df)
         # statistics_df.to_csv('tmp.csv')
+
         return statistics_df
 
-    def recommend_simple(self, update: bool = True):
+    def recommend_simple(self, update: bool = True, _print=False, reload=False):
         if update:
-            self.update()
+            self.update(reload=reload)
         statistics_df = self.calculate_statistics()
+
+        if _print:
+            print(statistics_df.loc[:, ['ticker', 'max_52w', 'max_1w', 'current', 'max_52w-10%']])
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
@@ -500,6 +524,7 @@ class History:
                     f'change: {Fore.RED}{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} %{Fore.RESET} '
                     f'\tlast week change: {Fore.RED}{statistics_sorted.loc[figi, "1w_chg_percent"]:.2f} %'
                     f'{Fore.RESET}'
+                    f'\tcurrent: {statistics_sorted.loc[figi, "current"]:.2f}'
                 )
         if len(msg) > 1:
             msg.append('\n==\n')
@@ -508,10 +533,13 @@ class History:
             print('Currently no good opportunities to buy :(')
         warnings.warn('The output values have not been verified', UserWarning)
 
-    def recommend_other(self, update: bool = True):
+    def recommend_other(self, update: bool = True, _print=False, reload=False):
         if update:
-            self.update()
+            self.update(reload=reload)
         statistics_df = self.calculate_statistics()
+
+        if _print:
+            print(statistics_df)  # .loc[:, ['ticker', 'max_52w', 'max_1w', 'current']])
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
@@ -533,6 +561,7 @@ class History:
                     f'\tprevious day change: {Fore.RED}'
                     f'{statistics_sorted.loc[figi, "1d_chg_percent"]:.2f} %'
                     f'{Fore.RESET}'
+                    f'\tcurrent: {statistics_sorted.loc[figi, "current"]:.3f}'
                 )
         if len(msg) > 1:
             msg.append('\n==\n')
