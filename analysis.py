@@ -264,14 +264,36 @@ def get_etfs_daily_history(
     return out, tickers
 
 
-def get_current_price(figi: str):
+def get_current_price(figi: str = None, ticker: str = None):
     """
     If the market is open, return the lowest `ask` price for the given figi.
     Otherwise, return the close price of the last trading day.
-    :param figi:
-    :return:
+
+    Note: close price should be used because it correctly represents the last transaction.
+    See: https://www.quora.com/What-is-the-difference-between-last-traded-price-LTP-and-closing-price
+    This explains the difference with Tinkoff Investment app where the `last_price` is shown instead
+    Close price when the market is close was verified.
+    #todo verify current price when the market is open
+
+    Parameters
+    ----------
+    figi
+    ticker
+
+    Returns
+    -------
+
     """
-    if figi in obsolete_tickers.values():
+    if figi is None:
+        if ticker is None:
+            raise ValueError('Either ticker or figi should be provided.')
+        else:
+            figi = get_figi_for_ticker(ticker)
+    elif ticker is not None and get_figi_for_ticker(ticker) != figi:
+        raise ValueError(
+            f'Ticker and figi point to different products: {figi} {get_figi_for_ticker(ticker)}')
+
+    if figi in obsolete_tickers.values() or figi is None:
         return np.nan
 
     try:
@@ -430,38 +452,47 @@ class History:
         """
         Print basic calculate_statistics such as increase and decrease from 52-week
         extrema.
+
+        Note: to better exclude the extreme values for years and determine the true range,
+        the max and min are replaced with close quantiles. For weeks, the true max and min
+        are still kept. In theory, a similar procedure can be implemented, but higher resolution
+        data are required.
+
         :param position what time of day (o, c, h, l) to use to
         assign a value to a day :return:
+        #todo for correct week max and min, need to get at least hourly data for the latest week at least
         """
         figis = self._data.figi.unique()
+        max_quantile = 0.97  # to make extrema calculations more robust to outliers,
+        min_quantile = 1 - max_quantile  # calculate as close quantiles instead of real extremum
 
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
         filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
         filter_1d = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(days=1)
 
-        statistics = {'current':
+        statistics = {'last_price':
                           {figi: get_current_price(figi) for figi
                            in figis},
-                      'max_52w': self._data[self._data.time >=
-                                            filter_52w].groupby(
-                          by='figi').max()[position].to_dict(),
-                      'max_52w-10%': (self._data[self._data.time >=
-                                                filter_52w].groupby(
-                          by='figi').max()[position] * 0.9).to_dict(),
-                      'min_52w': self._data[self._data.time >=
-                                            filter_52w].groupby(
-                          by='figi').min()[position].to_dict(),
+                      'max_52w': self._data.loc[self._data.time >=
+                                                filter_52w, ['figi', 'h']].groupby(
+                          by='figi').quantile(max_quantile)['h'].to_dict(),
+                      'max_52w-10%': (self._data.loc[self._data.time >=
+                                                     filter_52w, ['figi', 'h']].groupby(
+                          by='figi').quantile(max_quantile)['h'] * 0.9).to_dict(),
+                      'min_52w': self._data.loc[self._data.time >=
+                                                filter_52w, ['figi', 'l']].groupby(
+                          by='figi').quantile(min_quantile)['l'].to_dict(),
                       'max_1w':
-                          self._data[self._data.time >= filter_1w].groupby(
-                              by='figi').max()[position].to_dict(),
+                          self._data.loc[self._data.time >= filter_1w, ['figi', 'h']].groupby(
+                              by='figi').quantile(1)['h'].to_dict(),
                       'min_1w':
-                          self._data[self._data.time >= filter_1w].groupby(
-                              by='figi').min()[position].to_dict(),
+                          self._data.loc[self._data.time >= filter_1w, ['figi', 'l']].groupby(
+                              by='figi').quantile(0)['l'].to_dict(),
                       '1w':
-                          self._data[self._data.time >= filter_1w].groupby(
+                          self._data.loc[self._data.time >= filter_1w, ['figi', position]].groupby(
                               by='figi').first()[position].to_dict(),
                       '1d':
-                          self._data[self._data.time <= filter_1d].groupby(
+                          self._data.loc[self._data.time <= filter_1d, ['figi', position]].groupby(
                               by='figi').last()[position].to_dict()
                       }
         # print(self._data[self._data.time >= filter_1w].groupby(
@@ -482,13 +513,13 @@ class History:
                 warnings.warn(f'Not all figis were found for the column `'
                               f'{key}`. The analysis may be incorrect.')
             statistics_df[key] = statistics_df.index.map(value)
-            if key != 'current':
-                statistics_df[key + '_chg'] = (statistics_df['current'] -
+            if key != 'last_price':
+                statistics_df[key + '_chg'] = (statistics_df['last_price'] -
                                                statistics_df[key]) / \
                                               statistics_df[key]
 
                 statistics_df[key + '_chg_percent'] = (statistics_df[
-                                                           'current'] -
+                                                           'last_price'] -
                                                        statistics_df[key]) / \
                                                       statistics_df[key] * 100
 
@@ -503,7 +534,12 @@ class History:
         statistics_df = self.calculate_statistics()
 
         if _print:
-            print(statistics_df.loc[:, ['ticker', 'max_52w', 'max_1w', 'current', 'max_52w-10%']])
+            print()
+            print(statistics_df.loc[:, ['ticker', 'max_52w', 'max_52w_chg_percent', 'max_1w',
+                                        'last_price', 'max_52w-10%']])
+            print(
+                '* Note: max and min for weeks and years are calculated differently, and may seem '
+                'inconsistent,\nbut should be OK to use. See docstring for details.')
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
@@ -524,14 +560,14 @@ class History:
                     f'change: {Fore.RED}{statistics_sorted.loc[figi, "max_52w_chg_percent"]:.2f} %{Fore.RESET} '
                     f'\tlast week change: {Fore.RED}{statistics_sorted.loc[figi, "1w_chg_percent"]:.2f} %'
                     f'{Fore.RESET}'
-                    f'\tcurrent: {statistics_sorted.loc[figi, "current"]:.2f}'
+                    f'\tlast_price: {statistics_sorted.loc[figi, "last_price"]:.2f}'
                 )
         if len(msg) > 1:
             msg.append('\n==\n')
             print(*msg, sep='\n')
         else:
             print('Currently no good opportunities to buy :(')
-        warnings.warn('The output values have not been verified', UserWarning)
+        # warnings.warn('The output values have not been verified', UserWarning)
 
     def recommend_other(self, update: bool = True, _print=False, reload=False):
         if update:
@@ -561,7 +597,7 @@ class History:
                     f'\tprevious day change: {Fore.RED}'
                     f'{statistics_sorted.loc[figi, "1d_chg_percent"]:.2f} %'
                     f'{Fore.RESET}'
-                    f'\tcurrent: {statistics_sorted.loc[figi, "current"]:.3f}'
+                    f'\tlast_price: {statistics_sorted.loc[figi, "last_price"]:.3f}'
                 )
         if len(msg) > 1:
             msg.append('\n==\n')
@@ -569,4 +605,4 @@ class History:
         else:
             print('Currently no good opportunities to buy :(')
 
-        warnings.warn('The output values have not been verified', UserWarning)
+        # warnings.warn('The output values have not been verified', UserWarning)
