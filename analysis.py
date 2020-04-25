@@ -41,6 +41,7 @@ import sys
 import colorama
 from colorama import Fore, Style
 import pathlib
+from pathlib import Path
 
 colorama.init()
 
@@ -56,7 +57,10 @@ EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(
     tzinfo=MOSCOW_TIMEZONE)
 # TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and sometimes as +3:00. To fix
 obsolete_tickers = {'FXJP': 'BBG005HM5979', 'FXAU': 'BBG005HM6BL7', 'FXUK': 'BBG005HLK5V5'}
-logfile = 'log.log'
+
+logfolder = Path('logs')
+os.makedirs(logfolder, exist_ok=True)
+logfile = logfolder / f'{str(dt.datetime.today())}.log'
 
 # Initialize the openapi
 client = openapi.sandbox_api_client(token)
