@@ -378,12 +378,17 @@ class History:
         return loaded
 
     def _save_data(self):
+        # Do not save nan time
+        data_to_save = copy.deepcopy(self._data)
+        data_to_save.drop(index = data_to_save[data_to_save['time'].isna()].index, inplace=True)
+
+
         tmp_data_file = self.data_file.with_suffix('.tmp')
         tmp_tickers_file = self.tickers_file.with_suffix('.tmp')
         success = False
         # Save to another file
         try:
-            self._data.to_csv(tmp_data_file, index=False)
+            data_to_save.to_csv(tmp_data_file, index=False)
             with open(tmp_tickers_file, 'w') as f:
                 for ticker in self._tickers:
                     f.write(ticker + '\n')
