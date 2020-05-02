@@ -596,7 +596,8 @@ class History:
         statistics_df = self.calculate_statistics()
 
         if _print:
-            print(statistics_df)  # .loc[:, ['ticker', 'max_52w', 'max_1w', 'current']])
+            with pd.option_context('precision', 2):
+                print(statistics_df)
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
