@@ -60,7 +60,7 @@ obsolete_tickers = {'FXJP': 'BBG005HM5979', 'FXAU': 'BBG005HM6BL7', 'FXUK': 'BBG
 
 logfolder = Path('logs')
 os.makedirs(logfolder, exist_ok=True)
-logfile = logfolder / f'{str(dt.datetime.today())}.log'
+logfile = logfolder / f'{str(dt.date.today())}.log'
 
 # Initialize the openapi
 client = openapi.sandbox_api_client(token)
