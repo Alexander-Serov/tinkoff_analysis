@@ -1,5 +1,5 @@
 # tinkoff-analysis
-A solution using `tinkoff-api` investments for market situation analysis
+A solution using `tinkoff-api` investments and [`open-api-python-client`](https://github.com/Awethon/open-api-python-client) python client for market situation analysis
 
 
 # Installation
