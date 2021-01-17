@@ -462,7 +462,8 @@ class History:
                                      ignore_index=True)
             # Convert the time column to time because after merge it changes
             # to object
-            merged.time = pd.to_datetime(self._data.time)
+            # merged.to_csv('test1.csv')
+            # merged.time = pd.to_datetime(merged.time)
             self._data = merged
             print(f'History data updated successfully since {start_date}!')
 
@@ -484,7 +485,7 @@ class History:
         #todo for correct week max and min, need to get at least hourly data for the latest week at least
         """
         figis = self._data.figi.unique()
-        max_quantile = 0.97  # to make extrema calculations more robust to outliers,
+        max_quantile = 0.99  # to make extrema calculations more robust to outliers,
         min_quantile = 1 - max_quantile  # calculate as close quantiles instead of real extremum
 
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
@@ -556,8 +557,11 @@ class History:
 
         if _print:
             print()
-            print(statistics_df.loc[:, ['ticker', 'max_52w', 'max_52w_chg_percent', 'max_1w',
-                                        'last_price', 'max_52w-10%']])
+            statistics_df_sorted = statistics_df.sort_values('max_52w_chg_percent')
+            with pd.option_context('precision', 2):
+                print(statistics_df_sorted.loc[:,
+                      ['ticker', 'max_52w', 'max_52w_chg_percent', '1w_chg_percent',
+                       'max_1w', 'last_price', 'max_52w-10%']])
             print(
                 '* Note: max and min for weeks and years are calculated differently, and may seem '
                 'inconsistent,\nbut should be OK to use. See docstring for details.')
