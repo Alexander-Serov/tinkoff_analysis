@@ -1,0 +1,14 @@
+[flake8]
+ignore =
+    E203, W503, E231 # Incompatible with black
+
+max-line-length=92
+
+exclude =
+    venv/,
+    .git,
+    __pycache__,
+    **/.eggs/,
+    **/.tox/,
+
+max-complexity = 10
