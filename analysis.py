@@ -60,7 +60,7 @@ obsolete_tickers = {'FXJP': 'BBG005HM5979', 'FXAU': 'BBG005HM6BL7', 'FXUK': 'BBG
 
 logfolder = Path('logs')
 os.makedirs(logfolder, exist_ok=True)
-logfile = logfolder / f'{str(dt.datetime.today())}.log'
+logfile = logfolder / f'{str(dt.date.today())}.log'
 
 # Initialize the openapi
 client = openapi.sandbox_api_client(token)
@@ -92,7 +92,7 @@ def log_to_file(*args):
         # raise e
 
 
-def get_figi_history(figi, start, end, interval):
+def get_figi_history(figi, start, end, interval, verbose=False):
     """
     Get history for a given figi identifier
     :param figi:
@@ -110,6 +110,8 @@ def get_figi_history(figi, start, end, interval):
         #       market.market_candles_get(figi=figi,
         #                                       _from=start.isoformat(),
         #                                  to=end.isoformat(), interval=interval))
+        if verbose:
+            print(f'Received market response:', hist.payload.candles)
         candles = hist.payload.candles
         candles_dict = [candles[i].to_dict() for i in range(len(candles))]
         df = pd.DataFrame.from_dict(candles_dict)
@@ -159,7 +161,8 @@ def get_ticker_history(ticker, start, end, interval):
 def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
                      start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(
                          weeks=52),
-                     interval='month'):
+                     interval='month',
+                     verbose=False):
     """
     Get history _data with a given interval for all available ETFs.
     :param interval:
@@ -173,8 +176,11 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
         figi = etf.figi
         ticker = etf.ticker
         tickers.append(ticker)
+        if verbose:
+            print(
+                f'Getting ETF history for figi={figi} from {start} till {end}, interval={interval}.')
         one_etf_history = get_figi_history(figi=figi, start=start, end=end,
-                                           interval=interval)
+                                           interval=interval, verbose=False)
 
         if one_etf_history.empty:
             continue
@@ -202,7 +208,8 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
 def get_etfs_daily_history(
         end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
         start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52,
-                                                              days=1)):
+                                                              days=1),
+        verbose=False):
     """
     Get daily market history (1 point per day) in exactly the requested interval.
 
@@ -236,8 +243,10 @@ def get_etfs_daily_history(
     dfs = []
     for period in tqdm(periods,
                        desc=f'Getting forecast with interval={interval}'):
+        if verbose:
+            print(f'Requesting history from {period[0]} till {period[1]}.')
         df, tickers = get_etfs_history(start=period[0], end=period[1],
-                                       interval=interval)
+                                       interval=interval, verbose=verbose)
         if df.empty:
             print(
                 f'Server returned an empty reply for the following period: {period}!')
@@ -330,13 +339,14 @@ class History:
     History.data and History.trackers to access a dataframe containing price history and a trackers list
     """
 
-    def __init__(self, interval='day'):
+    def __init__(self, interval='day', verbose=False):
         self.interval = interval
         self.data_file = main_folder / f'ETFs_history_i={interval}.csv'
         self.tickers_file = main_folder / f'tickers_i={interval}.dat'
         self._data = pd.DataFrame()
         self._tickers = []
         self._load_data()
+        self.verbose = verbose
 
     @property
     def last_date(self):
@@ -378,12 +388,16 @@ class History:
         return loaded
 
     def _save_data(self):
+        # Do not save nan time
+        data_to_save = copy.deepcopy(self._data)
+        data_to_save.drop(index=data_to_save[data_to_save['time'].isna()].index, inplace=True)
+
         tmp_data_file = self.data_file.with_suffix('.tmp')
         tmp_tickers_file = self.tickers_file.with_suffix('.tmp')
         success = False
         # Save to another file
         try:
-            self._data.to_csv(tmp_data_file, index=False)
+            data_to_save.to_csv(tmp_data_file, index=False)
             with open(tmp_tickers_file, 'w') as f:
                 for ticker in self._tickers:
                     f.write(ticker + '\n')
@@ -409,7 +423,7 @@ class History:
 
         return success
 
-    def update(self, reload=False, verbose=False):
+    def update(self, reload=False):
         """
         Fetch the latest _data from server starting from 2 last known days.
         :return:
@@ -422,10 +436,13 @@ class History:
         else:
             start_date = self.last_date - dt.timedelta(days=1)
 
-        if verbose:
-            print(f'Updating historical data starting from {start_date}')
+        if self.verbose:
+            print(f'Updating historical data from {start_date} till {today}')
 
-        new_data, tickers = get_etfs_daily_history(start=start_date, end=today)
+        new_data, tickers = get_etfs_daily_history(start=start_date, end=today,
+                                                   verbose=self.verbose)
+        if self.verbose:
+            print('Update function received the following new data: ', new_data)
         if new_data is None or new_data.empty:
             raise RuntimeError(
                 f'The received data frame cannot be empty because one of the '
@@ -579,7 +596,8 @@ class History:
         statistics_df = self.calculate_statistics()
 
         if _print:
-            print(statistics_df)  # .loc[:, ['ticker', 'max_52w', 'max_1w', 'current']])
+            with pd.option_context('precision', 2):
+                print(statistics_df)
 
         # Print recommendation according to current strategy
         # TODO formalize strategies into a separate class or functions
