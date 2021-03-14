@@ -19,14 +19,13 @@ Candle limits:
 """
 import inspect
 import time
+from typing import Union, List, Tuple
 
 from openapi_client import openapi
 from openapi_genclient.exceptions import ApiException
 import datetime as dt
 from pytz import timezone
 import os
-from openapi_client.openapi_streaming import run_stream_consumer
-from openapi_client.openapi_streaming import print_event
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
@@ -55,7 +54,8 @@ LOCAL_TIMEZONE = dt.datetime.now(dt.timezone.utc).astimezone().tzinfo
 MOSCOW_TIMEZONE = pytz.timezone('Europe/Moscow')
 EARLIEST_DATE = dt.datetime.fromisoformat('2013-01-01').replace(
     tzinfo=MOSCOW_TIMEZONE)
-# TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and sometimes as +3:00. To fix
+# TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and
+#  sometimes as +3:00. To fix
 obsolete_tickers = {'FXJP': 'BBG005HM5979', 'FXAU': 'BBG005HM6BL7', 'FXUK': 'BBG005HLK5V5'}
 
 logfolder = Path('logs')
@@ -161,12 +161,27 @@ def get_ticker_history(ticker, start, end, interval):
 def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
                      start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(
                          weeks=52),
-                     interval='month',
-                     verbose=False):
-    """
-    Get history _data with a given interval for all available ETFs.
-    :param interval:
-    :return:
+                     freq='month',
+                     verbose=False) -> Tuple[pd.DataFrame, List[str]]:
+    """Get history _data with a given interval for all available ETFs.
+
+    Parameters
+    ----------
+    verbose
+        If True, print extra debug information.
+    end
+        End of the time frame for which to get history.
+    start
+        Start of the time string for which to return history.
+    freq
+        Frequency of the returned values.
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe with historical values of all ETFs.
+    list
+        List of ETF tickers.
     """
     # print('C1', start, end)
     tickers = []
@@ -178,14 +193,14 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
         tickers.append(ticker)
         if verbose:
             print(
-                f'Getting ETF history for figi={figi} from {start} till {end}, interval={interval}.')
+                f'Getting ETF history for figi={figi} from {start} till {end}, interval={freq}.')
         one_etf_history = get_figi_history(figi=figi, start=start, end=end,
-                                           interval=interval, verbose=False)
+                                           interval=freq, verbose=False)
 
         if one_etf_history.empty:
             continue
 
-        if not one_etf_history.time.is_unique and interval in ['day']:
+        if not one_etf_history.time.is_unique and freq in ['day']:
             print(ticker, one_etf_history)
             raise ValueError(f'Received time stamps are not unique for '
                              f'ticker={ticker} and period=[{start}, {end}]')
@@ -198,7 +213,8 @@ def get_etfs_history(end=dt.datetime.now(dt.timezone.utc),
         if all_etfs_history.empty:
             all_etfs_history = one_etf_history
         else:
-            # all_etfs_history = all_etfs_history.merge(one_etf_history, how='outer', on=['time', 'figi'])
+            # all_etfs_history = all_etfs_history.merge(one_etf_history,
+            # how='outer', on=['time', 'figi'])
             all_etfs_history = all_etfs_history.append(one_etf_history,
                                                        ignore_index=True)
 
@@ -214,7 +230,8 @@ def get_etfs_daily_history(
     Get daily market history (1 point per day) in exactly the requested interval.
 
     Note:
-    Due to API restrictions, an interval longer than a year must be divided into years when fetched
+    Due to API restrictions, an interval longer than a year must be divided into years
+    when fetched
     """
     interval = 'day'
     interval_dt = dt.timedelta(days=1)
@@ -246,7 +263,7 @@ def get_etfs_daily_history(
         if verbose:
             print(f'Requesting history from {period[0]} till {period[1]}.')
         df, tickers = get_etfs_history(start=period[0], end=period[1],
-                                       interval=interval, verbose=verbose)
+                                       freq=interval, verbose=verbose)
         if df.empty:
             print(
                 f'Server returned an empty reply for the following period: {period}!')
@@ -257,10 +274,12 @@ def get_etfs_daily_history(
     else:
         out, tickers = None, None
     # if len(out) < (end-start) / dt.timedelta(days=1):
-    #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v. {(end-start) / dt.timedelta(days=1)}',
+    #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v.
+    #     {(end-start) / dt.timedelta(days=1)}',
     #                   RuntimeWarning)
 
-    # Drop all _data points after the end date (because the API does not return exactly what was requested)
+    # Drop all _data points after the end date (because the API does not return exactly
+    # what was requested)
     # inds = out[out.time > end]
     # if len(inds) > 0:
     #     out.drop(inds.index, inplace=True)
@@ -282,9 +301,11 @@ def get_current_price(figi: str = None, ticker: str = None):
     If the market is open, return the lowest `ask` price for the given figi.
     Otherwise, return the close price of the last trading day.
 
-    Note: close price should be used because it correctly represents the last transaction.
+    Note: close price should be used because it correctly represents the last
+    transaction.
     See: https://www.quora.com/What-is-the-difference-between-last-traded-price-LTP-and-closing-price
-    This explains the difference with Tinkoff Investment app where the `last_price` is shown instead
+    This explains the difference with Tinkoff Investment app where the `last_price` is
+    shown instead
     Close price when the market is close was verified.
     #todo verify current price when the market is open
 
@@ -330,13 +351,16 @@ def get_current_price(figi: str = None, ticker: str = None):
 
 class History:
     """
-    A set of functions to download, update and locally store the history of all provided ETFs.
-    By default, only the _data up to now is stored. Today's _data is always incomplete, so the last day in the recorded
+    A set of functions to download, update and locally store the history of all provided
+    ETFs.
+    By default, only the _data up to now is stored. Today's _data is always incomplete,
+    so the last day in the recorded
     data is always updated.
 
     Usage:
-    History.update() # to update the local database of prices
-    History.data and History.trackers to access a dataframe containing price history and a trackers list
+    History().update() # to update the local database of prices
+    History.data and History.trackers to access a dataframe containing price history
+    and a trackers list
     """
 
     def __init__(self, interval='day', verbose=False):
@@ -424,9 +448,13 @@ class History:
         return success
 
     def update(self, reload=False):
-        """
-        Fetch the latest _data from server starting from 2 last known days.
-        :return:
+        """Fetch the latest price data from server from the last cached date till now.
+
+        Parameters
+        ----------
+        reload
+            If False, will use the stored price cache. Otherwise, will reload all
+            from the server.
         """
         today = dt.datetime.now(MOSCOW_TIMEZONE)
         # If _data have been loaded, only fetch data starting with the last
@@ -475,18 +503,25 @@ class History:
         Print basic calculate_statistics such as increase and decrease from 52-week
         extrema.
 
-        Note: to better exclude the extreme values for years and determine the true range,
-        the max and min are replaced with close quantiles. For weeks, the true max and min
-        are still kept. In theory, a similar procedure can be implemented, but higher resolution
+        Note: to better exclude the extreme values for years and determine the true
+        range,
+        the max and min are replaced with close quantiles. For weeks, the true max and
+        min
+        are still kept. In theory, a similar procedure can be implemented, but higher
+        resolution
         data are required.
 
-        :param position what time of day (o, c, h, l) to use to
-        assign a value to a day :return:
-        #todo for correct week max and min, need to get at least hourly data for the latest week at least
+        :param position what time of day (o, c, h, l: open, close, low, high) to use to
+        assign a value to a day
+
+        :return:
+        #todo for correct week max and min, need to get at least hourly data for the
+        latest week at least
         """
         figis = self._data.figi.unique()
         max_quantile = 0.99  # to make extrema calculations more robust to outliers,
-        min_quantile = 1 - max_quantile  # calculate as close quantiles instead of real extremum
+        min_quantile = 1 - max_quantile  # calculate as close quantiles instead of
+        # real extremum
 
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
         filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
@@ -563,7 +598,8 @@ class History:
                       ['ticker', 'max_52w', 'max_52w_chg_percent', '1w_chg_percent',
                        'max_1w', 'last_price', 'max_52w-10%']])
             print(
-                '* Note: max and min for weeks and years are calculated differently, and may seem '
+                '* Note: max and min for weeks and years are calculated differently, '
+                'and may seem ' 
                 'inconsistent,\nbut should be OK to use. See docstring for details.')
 
         # Print recommendation according to current strategy
@@ -573,7 +609,7 @@ class History:
         THRESHOLD_1W_CHG = -1e-8
         msg = [f'\n==\nGood opportunities to buy (criteria: i. 52w change <= '
                f'{THRESHOLD_MAX_52W_CHG_PERCENT} %, ii. 1w change <= '
-               f'{THRESHOLD_1W_CHG:.2f}):']
+               f'{THRESHOLD_1W_CHG:.2f} %):']
         for figi in statistics_sorted.index:
             # filt = statistics_sorted.index == figi
             if (statistics_sorted.loc[figi, 'max_52w_chg_percent'] <=
