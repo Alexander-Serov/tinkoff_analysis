@@ -111,8 +111,8 @@ def get_figi_history(figi, start, end, interval, verbose=False):
         if verbose:
             print("Received market response:", hist.payload.candles)
         candles = hist.payload.candles
-        candles_dict = [candles[i].to_dict() for i in range(len(candles))]
-        df = pd.DataFrame.from_dict(candles_dict)
+        candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
+        df = pd.DataFrame(candles_dicts)
     except Exception as e:
         if figi not in obsolete_tickers.values():
             log_to_file(f"Unable to load history for figi={figi}")
