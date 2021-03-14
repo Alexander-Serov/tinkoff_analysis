@@ -37,6 +37,7 @@ from openapi_client import openapi
 from openapi_genclient.exceptions import ApiException
 from tqdm import tqdm
 
+CACHE_SIZE = 1000
 colorama.init()
 
 # Load the token
@@ -120,7 +121,9 @@ def get_figi_history(figi, start, end, interval, verbose=False):
     return df
 
 
-@lru_cache(maxsize=1000)
+
+
+@lru_cache(maxsize=CACHE_SIZE)
 def get_figi_for_ticker(ticker):
     res = market.market_search_by_ticker_get(ticker).payload.instruments
     if res:
@@ -130,7 +133,7 @@ def get_figi_for_ticker(ticker):
     return figi
 
 
-@lru_cache(maxsize=1000)
+@lru_cache(maxsize=CACHE_SIZE)
 def get_ticker_for_figi(figi):
     if figi in obsolete_tickers.values():
         return None
