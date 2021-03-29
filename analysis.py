@@ -66,243 +66,6 @@ client = openapi.sandbox_api_client(token)
 market = client.market
 
 
-def get_all_etfs(reload=False):
-    if get_all_etfs.etfs is None or reload:
-        get_all_etfs.etfs = market.market_etfs_get().payload.instruments
-    return get_all_etfs.etfs
-
-
-get_all_etfs.etfs = None
-
-
-def log_to_file(*args):
-    curframe = inspect.currentframe()
-    calframe = inspect.getouterframes(curframe, 2)
-    caller = calframe[1][3]
-    try:
-        with open(logfile, "a") as f:
-            f.write(str(dt.datetime.now()) + f" function: {caller}\n")
-            for arg in args:
-                f.write(str(arg))
-            f.write("\n\n")
-    except Exception:
-        print("Unable to save the following thing to log:")
-        print(args)
-
-
-def get_figi_history(figi, start, end, interval, verbose=False):
-    """
-    Get history for a given figi identifier
-    :param figi:
-    :param start:
-    :param end:
-    :param interval:
-    :return:
-    """
-    df = None
-    try:
-        # print('C2', start.isoformat(), end.isoformat())
-        hist = market.market_candles_get(
-            figi=figi, _from=start.isoformat(), to=end.isoformat(), interval=interval
-        )
-        # print('1', start.isoformat(), end.isoformat(),
-        #       market.market_candles_get(figi=figi,
-        #                                       _from=start.isoformat(),
-        #                                  to=end.isoformat(), interval=interval))
-        if verbose:
-            print("Received market response:", hist.payload.candles)
-        candles = hist.payload.candles
-        candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
-        df = pd.DataFrame(candles_dicts)
-    except Exception as e:
-        if figi not in obsolete_tickers.values():
-            log_to_file(f"Unable to load history for figi={figi}")
-            log_to_file(e)
-    return df
-
-
-
-
-@lru_cache(maxsize=CACHE_SIZE)
-def get_figi_for_ticker(ticker):
-    res = market.market_search_by_ticker_get(ticker).payload.instruments
-    if res:
-        figi = res[0].figi
-    else:
-        figi = None
-    return figi
-
-
-@lru_cache(maxsize=CACHE_SIZE)
-def get_ticker_for_figi(figi):
-    if figi in obsolete_tickers.values():
-        return None
-    try:
-        return market.market_search_by_figi_get(figi).payload.ticker
-    except ApiException as e:
-        log_to_file(f"Unable to get ticker for figi={figi}.")
-        log_to_file(str(e))
-        return None
-
-
-def get_ticker_history(ticker, start, end, interval):
-    """
-    Get history for the given ticker.
-    Just gets the figi and calls the appropriate figi history function.
-    :param ticker:
-    :param start:
-    :param end:
-    :param interval:
-    :return:
-    """
-    figi = get_figi_for_ticker(ticker)
-    return get_figi_history(figi, start, end, interval)
-
-
-def get_etfs_history(
-    end=dt.datetime.now(dt.timezone.utc),
-    start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(weeks=52),
-    freq="month",
-    verbose=False,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """Get history _data with a given interval for all available ETFs.
-
-    Parameters
-    ----------
-    verbose
-        If True, print extra debug information.
-    end
-        End of the time frame for which to get history.
-    start
-        Start of the time string for which to return history.
-    freq
-        Frequency of the returned values.
-
-    Returns
-    -------
-    pd.DataFrame
-        A dataframe with historical values of all ETFs.
-    list
-        List of ETF tickers.
-    """
-    # print('C1', start, end)
-    tickers = []
-    etfs = get_all_etfs()
-    all_etfs_history = pd.DataFrame()
-    for i, etf in enumerate(etfs):
-        figi = etf.figi
-        ticker = etf.ticker
-        tickers.append(ticker)
-        if verbose:
-            print(
-                f"Getting ETF history for figi={figi} from {start} till {end},"
-                f" interval={freq}."
-            )
-        one_etf_history = get_figi_history(
-            figi=figi, start=start, end=end, interval=freq, verbose=False
-        )
-
-        if one_etf_history.empty:
-            continue
-
-        if not one_etf_history.time.is_unique and freq in ["day"]:
-            print(ticker, one_etf_history)
-            raise ValueError(
-                f"Received time stamps are not unique for "
-                f"ticker={ticker} and period=[{start}, {end}]"
-            )
-
-        one_etf_history.drop(columns=["interval"], inplace=True)
-        if "ticker" not in one_etf_history.columns:
-            one_etf_history["ticker"] = ticker
-
-        # Append to the large table
-        if all_etfs_history.empty:
-            all_etfs_history = one_etf_history
-        else:
-            # all_etfs_history = all_etfs_history.merge(one_etf_history,
-            # how='outer', on=['time', 'figi'])
-            all_etfs_history = all_etfs_history.append(
-                one_etf_history, ignore_index=True
-            )
-
-    return all_etfs_history, tickers
-
-
-def get_etfs_daily_history(
-    end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
-    start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
-    verbose=False,
-):
-    """
-    Get daily market history (1 point per day) in exactly the requested interval.
-
-    Note:
-    Due to API restrictions, an interval longer than a year must be divided into years
-    when fetched
-    """
-    interval = "day"
-    interval_dt = dt.timedelta(days=1)
-    print(f"Requesting ETF history from {start} till {end} with an interval={interval}")
-
-    # For daily forecasts drop hours
-    # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
-    # start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    # print('A2', start, end)
-    # print(start.tzinfo, end.tzinfo)
-    length = end.astimezone(MOSCOW_TIMEZONE) - start.astimezone(MOSCOW_TIMEZONE)
-    # The server bugs if the time period is smaller than 1 interval
-    if length < interval_dt:
-        start = end - interval_dt
-        length = interval_dt
-
-    one_period = dt.timedelta(weeks=52)
-    n_periods = int(math.ceil(length / one_period))
-    periods = [
-        [end - one_period * (i + 1), end - one_period * i] for i in range(n_periods)
-    ]
-    periods[-1][0] = start
-    periods = periods[::-1]
-
-    dfs = []
-    for period in tqdm(periods, desc=f"Getting forecast with interval={interval}"):
-        if verbose:
-            print(f"Requesting history from {period[0]} till {period[1]}.")
-        df, tickers = get_etfs_history(
-            start=period[0], end=period[1], freq=interval, verbose=verbose
-        )
-        if df.empty:
-            print(f"Server returned an empty reply for the following period: {period}!")
-            continue
-        dfs.append(df)
-    if dfs:
-        out = pd.concat(dfs, axis=0, ignore_index=True)
-    else:
-        out, tickers = None, None
-    # if len(out) < (end-start) / dt.timedelta(days=1):
-    #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v.
-    #     {(end-start) / dt.timedelta(days=1)}',
-    #                   RuntimeWarning)
-
-    # Drop all _data points after the end date (because the API does not return exactly
-    # what was requested)
-    # inds = out[out.time > end]
-    # if len(inds) > 0:
-    #     out.drop(inds.index, inplace=True)
-
-    # Drop nans in time
-    # print(out[pd.isna(out.time)])
-    # print(out.tail(1))
-
-    l1 = len(out)
-    out.drop(out[pd.isna(out.time)].index, inplace=True)
-    if len(out) < l1:
-        log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
-
-    return out, tickers
-
-
 def get_current_price(figi: str = None, ticker: str = None):
     """
     If the market is open, return the lowest `ask` price for the given figi.
@@ -358,6 +121,43 @@ def get_current_price(figi: str = None, ticker: str = None):
     return current_price
 
 
+@lru_cache(maxsize=1000)
+def get_figi_for_ticker(ticker):
+    res = market.market_search_by_ticker_get(ticker).payload.instruments
+    if res:
+        figi = res[0].figi
+    else:
+        figi = None
+    return figi
+
+
+@lru_cache(maxsize=1000)
+def get_ticker_for_figi(figi):
+    if figi in obsolete_tickers.values():
+        return None
+    try:
+        return market.market_search_by_figi_get(figi).payload.ticker
+    except ApiException as e:
+        log_to_file(f"Unable to get ticker for figi={figi}.")
+        log_to_file(str(e))
+        return None
+
+
+def log_to_file(*args):
+    curframe = inspect.currentframe()
+    calframe = inspect.getouterframes(curframe, 2)
+    caller = calframe[1][3]
+    try:
+        with open(logfile, "a") as f:
+            f.write(str(dt.datetime.now()) + f" function: {caller}\n")
+            for arg in args:
+                f.write(str(arg))
+            f.write("\n\n")
+    except Exception:
+        print("Unable to save the following thing to log:")
+        print(args)
+
+
 class History:
     """
     A set of functions to download, update and locally store the history of all provided
@@ -378,25 +178,9 @@ class History:
         self.tickers_file = main_folder / f"tickers_i={interval}.dat"
         self._data = pd.DataFrame()
         self._tickers = []
+        self._etfs = None
         self._load_data()
         self.verbose = verbose
-
-    @property
-    def last_date(self):
-        if not self._data.empty:
-            last_date = self._data.time.max()
-        else:
-            last_date = None
-
-        return last_date
-
-    @property
-    def data(self):
-        return copy.deepcopy(self._data)
-
-    @property
-    def tickers(self):
-        return copy.deepcopy(self._tickers)
 
     def _load_data(self):
         loaded = False
@@ -455,7 +239,230 @@ class History:
                 try:
                     os.rename(tmp_file, file)
                 except Exception as e:
+                    success = False
                     raise e
+
+        return success
+
+    def get_ticker_history(self, ticker, start, end, interval):
+        """
+        Get history for the given ticker.
+        Just gets the figi and calls the appropriate figi history function.
+        :param ticker:
+        :param start:
+        :param end:
+        :param interval:
+        :return:
+        """
+
+        figi = get_figi_for_ticker(ticker)
+        return self._get_figi_history(figi, start, end, interval)
+
+    def _get_all_etfs(self, reload=False):
+        if self._etfs is None or reload:
+            self._etfs = market.market_etfs_get().payload.instruments
+        return self._etfs
+
+    def _get_figi_history(self, figi, start, end, interval):
+        """
+        Get history for a given figi identifier
+        :param figi:
+        :param start:
+        :param end:
+        :param interval:
+        :return:
+        """
+        df = None
+        try:
+            # print('C2', start.isoformat(), end.isoformat())
+            hist = market.market_candles_get(
+                figi=figi,
+                _from=start.isoformat(),
+                to=end.isoformat(),
+                interval=interval,
+            )
+            # print('1', start.isoformat(), end.isoformat(),
+            #       market.market_candles_get(figi=figi,
+            #                                       _from=start.isoformat(),
+            #                                  to=end.isoformat(), interval=interval))
+            if self.verbose:
+                print("Received market response:", hist.payload.candles)
+            candles = hist.payload.candles
+            candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
+            df = pd.DataFrame(candles_dicts)
+        except Exception as e:
+            if figi not in obsolete_tickers.values():
+                log_to_file(f"Unable to load history for figi={figi}")
+                log_to_file(e)
+        return df
+
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def get_figi_for_ticker(ticker):
+    res = market.market_search_by_ticker_get(ticker).payload.instruments
+    if res:
+        figi = res[0].figi
+    else:
+        figi = None
+    return figi
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def get_ticker_for_figi(figi):
+    if figi in obsolete_tickers.values():
+        return None
+    try:
+        return market.market_search_by_figi_get(figi).payload.ticker
+    except ApiException as e:
+        log_to_file(f"Unable to get ticker for figi={figi}.")
+        log_to_file(str(e))
+        return None
+
+
+def _get_etfs_history(
+    self,
+    end=dt.datetime.now(dt.timezone.utc),
+    start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(weeks=52),
+    freq="month",
+    verbose=False,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Get history _data with a given interval for all available ETFs.
+
+    Parameters
+    ----------
+    end
+        End of the time frame for which to get history.
+    start
+        Start of the time string for which to return history.
+    freq
+        Frequency of the returned values.
+
+    Returns
+    -------
+    pd.DataFrame
+        A dataframe with historical values of all ETFs.
+    list
+        List of ETF tickers.
+    """
+    # print('C1', start, end)
+    tickers = []
+    etfs = self._get_all_etfs()
+    all_etfs_history = pd.DataFrame()
+    for i, etf in enumerate(etfs):
+        figi = etf.figi
+        ticker = etf.ticker
+        tickers.append(ticker)
+        if self.verbose:
+            print(
+                f"Getting ETF history for figi={figi} from {start} till {end},"
+                f" interval={freq}."
+            )
+        one_etf_history = self._get_figi_history(
+            figi=figi, start=start, end=end, interval=freq
+        )
+
+        if one_etf_history.empty:
+            continue
+
+        if not one_etf_history.time.is_unique and freq in ["day"]:
+            print(ticker, one_etf_history)
+            raise ValueError(
+                f"Received time stamps are not unique for "
+                f"ticker={ticker} and period=[{start}, {end}]"
+            )
+
+        one_etf_history.drop(columns=["interval"], inplace=True)
+        if "ticker" not in one_etf_history.columns:
+            one_etf_history["ticker"] = ticker
+
+        # Append to the large table
+        if all_etfs_history.empty:
+            all_etfs_history = one_etf_history
+        else:
+            # all_etfs_history = all_etfs_history.merge(one_etf_history,
+            # how='outer', on=['time', 'figi'])
+            all_etfs_history = all_etfs_history.append(
+                one_etf_history, ignore_index=True
+            )
+
+        return all_etfs_history, tickers
+
+    def _get_etfs_daily_history(
+        self,
+        end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
+        start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
+    ):
+        """
+        Get daily market history (1 point per day) in exactly the requested interval.
+
+        Note:
+        Due to API restrictions, an interval longer than a year must be divided into years
+        when fetched
+        """
+
+        interval = "day"
+        interval_dt = dt.timedelta(days=1)
+        print(
+            f"Requesting ETF history from {start} till {end} with an interval={interval}"
+        )
+
+        # For daily forecasts drop hours
+        # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
+        # start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        length = end.astimezone(MOSCOW_TIMEZONE) - start.astimezone(MOSCOW_TIMEZONE)
+        # The server bugs if the time period is smaller than 1 interval
+        if length < interval_dt:
+            start = end - interval_dt
+            length = interval_dt
+
+        one_period = dt.timedelta(weeks=52)
+        n_periods = int(math.ceil(length / one_period))
+        periods = [
+            [end - one_period * (i + 1), end - one_period * i] for i in range(n_periods)
+        ]
+        periods[-1][0] = start
+        periods = periods[::-1]
+
+        dfs = []
+        out, tickers = None, None
+        for period in tqdm(periods, desc=f"Getting forecast with interval={interval}"):
+            if self.verbose:
+                print(f"Requesting history from {period[0]} till {period[1]}.")
+            df, tickers = self._get_etfs_history(
+                start=period[0], end=period[1], freq=interval
+            )
+            if df.empty:
+                print(
+                    f"Server returned an empty reply for the following period: {period}!"
+                )
+                continue
+            dfs.append(df)
+        if dfs:
+            out = pd.concat(dfs, axis=0, ignore_index=True)
+
+        # if len(out) < (end-start) / dt.timedelta(days=1):
+        #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v.
+        #     {(end-start) / dt.timedelta(days=1)}',
+        #                   RuntimeWarning)
+
+        # Drop all _data points after the end date (because the API does not return exactly
+        # what was requested)
+        # inds = out[out.time > end]
+        # if len(inds) > 0:
+        #     out.drop(inds.index, inplace=True)
+
+        # Drop nans in time
+        # print(out[pd.isna(out.time)])
+        # print(out.tail(1))
+
+        l1 = len(out)
+        out.drop(out[pd.isna(out.time)].index, inplace=True)
+        if len(out) < l1:
+            log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
+
+        return out, tickers
 
     def update(self, reload=False):
         """Fetch the latest price data from server from the last cached date till now.
@@ -477,9 +484,7 @@ class History:
         if self.verbose:
             print(f"Updating historical data from {start_date} till {today}")
 
-        new_data, tickers = get_etfs_daily_history(
-            start=start_date, end=today, verbose=self.verbose
-        )
+        new_data, tickers = self._get_etfs_daily_history(start=start_date, end=today)
         if self.verbose:
             print("Update function received the following new data: ", new_data)
         if new_data is None or new_data.empty:
@@ -510,6 +515,23 @@ class History:
         self._data.sort_values(by="time", inplace=True)
         self._save_data()
 
+    @property
+    def last_date(self):
+        if not self._data.empty:
+            last_date = self._data.time.max()
+        else:
+            last_date = None
+
+        return last_date
+
+    @property
+    def data(self):
+        return copy.deepcopy(self._data)
+
+    @property
+    def tickers(self):
+        return copy.deepcopy(self._tickers)
+
     def calculate_statistics(self, position="c"):
         """
         Print basic calculate_statistics such as increase and decrease from 52-week
@@ -523,7 +545,7 @@ class History:
         resolution
         data are required.
 
-        :param position what time of day (o, c, h, l: open, close, low, high) to use to
+        :param position what time of day (o, c, h, l: open, close, high, low) to use to
         assign a value to a day
 
         :return:
