@@ -17,145 +17,20 @@ Candle limits:
 // - week [7 days, 2 years]
 // - month [1 month, 10 years]
 """
+
 import copy
 import datetime as dt
-import inspect
 import math
 import os
-import pathlib
 import warnings
-from functools import lru_cache
-from pathlib import Path
 from typing import List, Tuple
 
-import colorama
-import numpy as np
 import pandas as pd
-import pytz
 from colorama import Fore
-from openapi_client import openapi
-from openapi_genclient.exceptions import ApiException
 from tqdm import tqdm
 
-CACHE_SIZE = 1000
-colorama.init()
-
-# Load the token
-main_folder = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
-token_file = main_folder / "./token_sandbox"
-with open(token_file, "r") as f:
-    token = f.read().strip()
-
-LOCAL_TIMEZONE = dt.datetime.now(dt.timezone.utc).astimezone().tzinfo
-MOSCOW_TIMEZONE = pytz.timezone("Europe/Moscow")
-EARLIEST_DATE = dt.datetime.fromisoformat("2013-01-01").replace(tzinfo=MOSCOW_TIMEZONE)
-# TODO: In the recieved results, Moscow timezone sometimes appears as +2:30 and
-#  sometimes as +3:00. To fix
-obsolete_tickers = {
-    "FXJP": "BBG005HM5979",
-    "FXAU": "BBG005HM6BL7",
-    "FXUK": "BBG005HLK5V5",
-}
-
-logfolder = Path("logs")
-os.makedirs(logfolder, exist_ok=True)
-logfile = logfolder / f"{str(dt.date.today())}.log"
-
-# Initialize the openapi
-client = openapi.sandbox_api_client(token)
-market = client.market
-
-
-def get_current_price(figi: str = None, ticker: str = None):
-    """
-    If the market is open, return the lowest `ask` price for the given figi.
-    Otherwise, return the close price of the last trading day.
-
-    Note: close price should be used because it correctly represents the last
-    transaction.
-    See: https://www.quora.com/What-is-the-difference-between-last-traded-price-LTP-and-closing-price  # noqa: E501
-    This explains the difference with Tinkoff Investment app where the `last_price` is
-    shown instead
-    Close price when the market is close was verified.
-    #todo verify current price when the market is open
-
-    Parameters
-    ----------
-    figi
-    ticker
-
-    Returns
-    -------
-
-    """
-    if figi is None:
-        if ticker is None:
-            raise ValueError("Either ticker or figi should be provided.")
-        else:
-            figi = get_figi_for_ticker(ticker)
-    elif ticker is not None and get_figi_for_ticker(ticker) != figi:
-        raise ValueError(
-            f"Ticker and figi point to different products: {figi} "
-            f"{get_figi_for_ticker(ticker)}"
-        )
-
-    if figi in obsolete_tickers.values() or figi is None:
-        return np.nan
-
-    try:
-        ans = market.market_orderbook_get(figi=figi, depth=1)
-    except ApiException as e:
-        log_to_file(f"Unable to get current price for figi={figi}.")
-        log_to_file(str(e))
-        return np.nan
-    payload = ans.payload
-    if payload.trade_status == "NotAvailableForTrading":
-        current_price = payload.close_price
-    else:
-        order_response = payload.asks[0]
-        # print('debug-1', get_ticker_for_figi(figi), order_response)
-        current_price = order_response.price
-
-        # TODO not tested
-
-    return current_price
-
-
-@lru_cache(maxsize=1000)
-def get_figi_for_ticker(ticker):
-    res = market.market_search_by_ticker_get(ticker).payload.instruments
-    if res:
-        figi = res[0].figi
-    else:
-        figi = None
-    return figi
-
-
-@lru_cache(maxsize=1000)
-def get_ticker_for_figi(figi):
-    if figi in obsolete_tickers.values():
-        return None
-    try:
-        return market.market_search_by_figi_get(figi).payload.ticker
-    except ApiException as e:
-        log_to_file(f"Unable to get ticker for figi={figi}.")
-        log_to_file(str(e))
-        return None
-
-
-def log_to_file(*args):
-    curframe = inspect.currentframe()
-    calframe = inspect.getouterframes(curframe, 2)
-    caller = calframe[1][3]
-    try:
-        with open(logfile, "a") as f:
-            f.write(str(dt.datetime.now()) + f" function: {caller}\n")
-            for arg in args:
-                f.write(str(arg))
-            f.write("\n\n")
-    except Exception:
-        print("Unable to save the following thing to log:")
-        print(args)
+import utils
+from marketWrapper import MarketWrapper
 
 
 class History:
@@ -172,15 +47,20 @@ class History:
     and a trackers list
     """
 
-    def __init__(self, interval="day", verbose=False):
-        self.interval = interval
-        self.data_file = main_folder / f"ETFs_history_i={interval}.csv"
-        self.tickers_file = main_folder / f"tickers_i={interval}.dat"
+    def __init__(self, interval="day", market_wrapper=MarketWrapper(), verbose=False):
         self._data = pd.DataFrame()
         self._tickers = []
         self._etfs = None
-        self._load_data()
+
+        self.market_wrapper = market_wrapper
+        self.market = self.market_wrapper.market
+        self.interval = interval
+        self.data_file = utils.MAIN_FOLDER / f"ETFs_history_i={interval}.csv"
+        self.tickers_file = utils.MAIN_FOLDER / f"tickers_i={interval}.dat"
         self.verbose = verbose
+
+        # Update
+        self._load_data()
 
     def _load_data(self):
         loaded = False
@@ -192,7 +72,7 @@ class History:
             l1 = len(self._data)
             self._data.drop(self._data[pd.isna(self._data.time)].index, inplace=True)
             if len(self._data) < l1:
-                log_to_file(f"{l1 - len(self._data)} NaN time stamps dropped.")
+                utils.log_to_file(f"{l1 - len(self._data)} NaN time stamps dropped.")
 
             self._data.time = pd.to_datetime(self._data.time)
             with open(self.tickers_file, "r") as f:
@@ -255,15 +135,15 @@ class History:
         :return:
         """
 
-        figi = get_figi_for_ticker(ticker)
-        return self._get_figi_history(figi, start, end, interval)
+        figi = self.market_wrapper.get_figi_for_ticker(ticker)
+        return self.get_figi_history(figi, start, end, interval)
 
     def _get_all_etfs(self, reload=False):
         if self._etfs is None or reload:
-            self._etfs = market.market_etfs_get().payload.instruments
+            self._etfs = self.market.market_etfs_get().payload.instruments
         return self._etfs
 
-    def _get_figi_history(self, figi, start, end, interval):
+    def get_figi_history(self, figi, start, end, interval):
         """
         Get history for a given figi identifier
         :param figi:
@@ -272,10 +152,10 @@ class History:
         :param interval:
         :return:
         """
-        df = None
+        df = pd.DataFrame()
         try:
             # print('C2', start.isoformat(), end.isoformat())
-            hist = market.market_candles_get(
+            hist = self.market.market_candles_get(
                 figi=figi,
                 _from=start.isoformat(),
                 to=end.isoformat(),
@@ -291,43 +171,18 @@ class History:
             candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
             df = pd.DataFrame(candles_dicts)
         except Exception as e:
-            if figi not in obsolete_tickers.values():
-                log_to_file(f"Unable to load history for figi={figi}")
-                log_to_file(e)
+            if figi not in utils.OBSOLETE_TICKERS.values():
+                utils.log_to_file(f"Unable to load history for figi={figi}")
+                utils.log_to_file(e)
         return df
 
-
-
-@lru_cache(maxsize=CACHE_SIZE)
-def get_figi_for_ticker(ticker):
-    res = market.market_search_by_ticker_get(ticker).payload.instruments
-    if res:
-        figi = res[0].figi
-    else:
-        figi = None
-    return figi
-
-
-@lru_cache(maxsize=CACHE_SIZE)
-def get_ticker_for_figi(figi):
-    if figi in obsolete_tickers.values():
-        return None
-    try:
-        return market.market_search_by_figi_get(figi).payload.ticker
-    except ApiException as e:
-        log_to_file(f"Unable to get ticker for figi={figi}.")
-        log_to_file(str(e))
-        return None
-
-
-def _get_etfs_history(
-    self,
-    end=dt.datetime.now(dt.timezone.utc),
-    start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(weeks=52),
-    freq="month",
-    verbose=False,
-) -> Tuple[pd.DataFrame, List[str]]:
-    """Get history _data with a given interval for all available ETFs.
+    def get_etfs_history(
+        self,
+        end=dt.datetime.now(dt.timezone.utc),
+        start=dt.datetime.now(dt.timezone.utc) - dt.timedelta(weeks=52),
+        freq="month",
+    ) -> Tuple[pd.DataFrame, List[str]]:
+        """Get history _data with a given interval for all available ETFs.
 
     Parameters
     ----------
@@ -338,29 +193,29 @@ def _get_etfs_history(
     freq
         Frequency of the returned values.
 
-    Returns
-    -------
-    pd.DataFrame
-        A dataframe with historical values of all ETFs.
-    list
-        List of ETF tickers.
-    """
-    # print('C1', start, end)
-    tickers = []
-    etfs = self._get_all_etfs()
-    all_etfs_history = pd.DataFrame()
-    for i, etf in enumerate(etfs):
-        figi = etf.figi
-        ticker = etf.ticker
-        tickers.append(ticker)
-        if self.verbose:
-            print(
-                f"Getting ETF history for figi={figi} from {start} till {end},"
-                f" interval={freq}."
+        Returns
+        -------
+        pd.DataFrame
+            A dataframe with historical values of all ETFs.
+        list
+            List of ETF tickers.
+        """
+        # print('C1', start, end)
+        tickers = []
+        etfs = self._get_all_etfs()
+        all_etfs_history = pd.DataFrame()
+        for i, etf in enumerate(etfs):
+            figi = etf.figi
+            ticker = etf.ticker
+            tickers.append(ticker)
+            if self.verbose:
+                print(
+                    f"Getting ETF history for figi={figi} from {start} till {end},"
+                    f" interval={freq}."
+                )
+            one_etf_history = self.get_figi_history(
+                figi=figi, start=start, end=end, interval=freq
             )
-        one_etf_history = self._get_figi_history(
-            figi=figi, start=start, end=end, interval=freq
-        )
 
         if one_etf_history.empty:
             continue
@@ -388,10 +243,10 @@ def _get_etfs_history(
 
         return all_etfs_history, tickers
 
-    def _get_etfs_daily_history(
+    def get_etfs_daily_history(
         self,
-        end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
-        start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
+        end=dt.datetime.now(utils.MOSCOW_TIMEZONE) - dt.timedelta(days=1),
+        start=dt.datetime.now(utils.MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
     ):
         """
         Get daily market history (1 point per day) in exactly the requested interval.
@@ -411,7 +266,9 @@ def _get_etfs_history(
         # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
         # start = start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        length = end.astimezone(MOSCOW_TIMEZONE) - start.astimezone(MOSCOW_TIMEZONE)
+        length = end.astimezone(utils.MOSCOW_TIMEZONE) - start.astimezone(
+            utils.MOSCOW_TIMEZONE
+        )
         # The server bugs if the time period is smaller than 1 interval
         if length < interval_dt:
             start = end - interval_dt
@@ -430,7 +287,7 @@ def _get_etfs_history(
         for period in tqdm(periods, desc=f"Getting forecast with interval={interval}"):
             if self.verbose:
                 print(f"Requesting history from {period[0]} till {period[1]}.")
-            df, tickers = self._get_etfs_history(
+            df, tickers = self.get_etfs_history(
                 start=period[0], end=period[1], freq=interval
             )
             if df.empty:
@@ -460,7 +317,7 @@ def _get_etfs_history(
         l1 = len(out)
         out.drop(out[pd.isna(out.time)].index, inplace=True)
         if len(out) < l1:
-            log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
+            utils.log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
 
         return out, tickers
 
@@ -473,18 +330,18 @@ def _get_etfs_history(
             If False, will use the stored price cache. Otherwise, will reload all
             from the server.
         """
-        today = dt.datetime.now(MOSCOW_TIMEZONE)
+        today = dt.datetime.now(utils.MOSCOW_TIMEZONE)
         # If _data have been loaded, only fetch data starting with the last
         # date in the database
         if self._data.empty or reload:
-            start_date = EARLIEST_DATE
+            start_date = utils.EARLIEST_DATE
         else:
             start_date = self.last_date - dt.timedelta(days=1)
 
         if self.verbose:
             print(f"Updating historical data from {start_date} till {today}")
 
-        new_data, tickers = self._get_etfs_daily_history(start=start_date, end=today)
+        new_data, tickers = self.get_etfs_daily_history(start=start_date, end=today)
         if self.verbose:
             print("Update function received the following new data: ", new_data)
         if new_data is None or new_data.empty:
@@ -545,7 +402,8 @@ def _get_etfs_history(
         resolution
         data are required.
 
-        :param position what time of day (o, c, h, l: open, close, high, low) to use to
+        :param position
+        What time of day (o, c, h, l: open, close, high, low) to use to
         assign a value to a day
 
         :return:
@@ -557,12 +415,14 @@ def _get_etfs_history(
         min_quantile = 1 - max_quantile  # calculate as close quantiles instead of
         # real extremum
 
-        filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
-        filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
-        filter_1d = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(days=1)
+        filter_52w = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
+        filter_1w = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
+        filter_1d = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(days=1)
 
         statistics = {
-            "last_price": {figi: get_current_price(figi) for figi in figis},
+            "last_price": {
+                figi: self.market_wrapper.get_current_price(figi) for figi in figis
+            },
             "max_52w": self._data.loc[self._data.time >= filter_52w, ["figi", "h"]]
             .groupby(by="figi")
             .quantile(max_quantile)["h"]
@@ -579,11 +439,11 @@ def _get_etfs_history(
             .to_dict(),
             "max_1w": self._data.loc[self._data.time >= filter_1w, ["figi", "h"]]
             .groupby(by="figi")
-            .quantile(1)["h"]
+            .quantile(max_quantile)["h"]
             .to_dict(),
             "min_1w": self._data.loc[self._data.time >= filter_1w, ["figi", "l"]]
             .groupby(by="figi")
-            .quantile(0)["l"]
+            .quantile(min_quantile)["l"]
             .to_dict(),
             "1w": self._data.loc[self._data.time >= filter_1w, ["figi", position]]
             .groupby(by="figi")
@@ -594,21 +454,21 @@ def _get_etfs_history(
             .last()[position]
             .to_dict(),
         }
-        # print(self._data[self._data.time >= filter_1w].groupby(
-        #                       by='figi'))
+
+        # print(self._data[self._data.time >= filter_1w].groupby(by='figi'))
         # print(self._data[self._data.ticker == 'FXUS'].time.unique())
-
         # print(max_52w)
-
         # current_prices_df = pd.DataFrame.from_dict(current_prices)
         # print(current_prices_df)
 
         # Combine the calculate_statistics together
         statistics_df = pd.DataFrame(index=figis)
         statistics_df.index.name = "figi"
-        statistics_df["ticker"] = statistics_df.index.map(get_ticker_for_figi)
+        statistics_df["ticker"] = statistics_df.index.map(
+            self.market_wrapper.get_ticker_for_figi
+        )
         for key, value in statistics.items():
-            if set(figis) - set(value.keys()) - set(obsolete_tickers.values()):
+            if set(figis) - set(value.keys()) - set(utils.OBSOLETE_TICKERS.values()):
                 warnings.warn(
                     f"Not all figis were found for the column `"
                     f"{key}`. The analysis may be incorrect."
