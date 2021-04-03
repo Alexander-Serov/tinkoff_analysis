@@ -22,6 +22,7 @@ import copy
 import datetime as dt
 import math
 import os
+import time
 import warnings
 from typing import List, Tuple
 
@@ -124,6 +125,11 @@ class History:
 
         return success
 
+    def _get_all_etfs(self, reload=False):
+        if self._etfs is None or reload:
+            self._etfs = self.market.market_etfs_get().payload.instruments
+        return self._etfs
+
     def get_ticker_history(self, ticker, start, end, interval):
         """
         Get history for the given ticker.
@@ -138,11 +144,6 @@ class History:
         figi = self.market_wrapper.get_figi_for_ticker(ticker)
         return self.get_figi_history(figi, start, end, interval)
 
-    def _get_all_etfs(self, reload=False):
-        if self._etfs is None or reload:
-            self._etfs = self.market.market_etfs_get().payload.instruments
-        return self._etfs
-
     def get_figi_history(self, figi, start, end, interval):
         """
         Get history for a given figi identifier
@@ -153,27 +154,36 @@ class History:
         :return:
         """
         df = pd.DataFrame()
-        try:
-            # print('C2', start.isoformat(), end.isoformat())
-            hist = self.market.market_candles_get(
-                figi=figi,
-                _from=start.isoformat(),
-                to=end.isoformat(),
-                interval=interval,
-            )
-            # print('1', start.isoformat(), end.isoformat(),
-            #       market.market_candles_get(figi=figi,
-            #                                       _from=start.isoformat(),
-            #                                  to=end.isoformat(), interval=interval))
-            if self.verbose:
-                print("Received market response:", hist.payload.candles)
-            candles = hist.payload.candles
-            candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
-            df = pd.DataFrame(candles_dicts)
-        except Exception as e:
-            if figi not in utils.OBSOLETE_TICKERS.values():
-                utils.log_to_file(f"Unable to load history for figi={figi}")
-                utils.log_to_file(e)
+        hist = None
+        slept = False
+
+        while not hist:
+            try:
+                hist = self.market.market_candles_get(
+                    figi=figi,
+                    _from=start.isoformat(),
+                    to=end.isoformat(),
+                    interval=interval,
+                    # _request_timeout=1000,
+                )
+
+                if slept:
+                    print("LOADED AFTER SLEEP")
+                slept = False
+            except Exception as e:
+                print(e)
+                if figi not in utils.OBSOLETE_TICKERS.values():
+                    utils.log_to_file(f"Unable to load history for figi={figi}")
+                    utils.log_to_file(e)
+                print("Sleep 5 seconds")
+                time.sleep(5)
+                slept = True
+
+        if self.verbose:
+            print("Received market response:", hist.payload.candles)
+        candles = hist.payload.candles
+        candles_dicts = [candles[i].to_dict() for i in range(len(candles))]
+        df = pd.DataFrame(candles_dicts)
         return df
 
     def get_etfs_history(
@@ -208,11 +218,15 @@ class History:
             figi = etf.figi
             ticker = etf.ticker
             tickers.append(ticker)
+
+            # print(etf, figi, ticker)
+
             if self.verbose:
                 print(
                     f"Getting ETF history for figi={figi} from {start} till {end},"
                     f" interval={freq}."
                 )
+            # print(i, end=" ")
             one_etf_history = self.get_figi_history(
                 figi=figi, start=start, end=end, interval=freq
             )
@@ -283,7 +297,7 @@ class History:
         periods = periods[::-1]
 
         dfs = []
-        out, tickers = None, None
+        out, tickers = pd.DataFrame(), []
         for period in tqdm(periods, desc=f"Getting forecast with interval={interval}"):
             if self.verbose:
                 print(f"Requesting history from {period[0]} till {period[1]}.")
@@ -335,8 +349,11 @@ class History:
         # date in the database
         if self._data.empty or reload:
             start_date = utils.EARLIEST_DATE
+            self._etfs = None  # Drop etfs list to reload
         else:
-            start_date = self.last_date - dt.timedelta(days=1)
+            start_date = (self.last_date - dt.timedelta(days=1)).astimezone(
+                utils.MOSCOW_TIMEZONE
+            )
 
         if self.verbose:
             print(f"Updating historical data from {start_date} till {today}")
@@ -371,23 +388,6 @@ class History:
 
         self._data.sort_values(by="time", inplace=True)
         self._save_data()
-
-    @property
-    def last_date(self):
-        if not self._data.empty:
-            last_date = self._data.time.max()
-        else:
-            last_date = None
-
-        return last_date
-
-    @property
-    def data(self):
-        return copy.deepcopy(self._data)
-
-    @property
-    def tickers(self):
-        return copy.deepcopy(self._tickers)
 
     def calculate_statistics(self, position="c"):
         """
@@ -470,8 +470,8 @@ class History:
         for key, value in statistics.items():
             if set(figis) - set(value.keys()) - set(utils.OBSOLETE_TICKERS.values()):
                 warnings.warn(
-                    f"Not all figis were found for the column `"
-                    f"{key}`. The analysis may be incorrect."
+                    f"Not all figis were found for the column '{key}'."
+                    f" The analysis may be incorrect."
                 )
             statistics_df[key] = statistics_df.index.map(value)
             if key != "last_price":
@@ -596,3 +596,24 @@ class History:
             print("Currently no good opportunities to buy :(")
 
         # warnings.warn('The output values have not been verified', UserWarning)
+
+    @property
+    def last_date(self):
+        if not self._data.empty:
+            last_date = self._data.time.max()
+        else:
+            last_date = None
+
+        return last_date
+
+    @property
+    def data(self):
+        return copy.deepcopy(self._data)
+
+    @property
+    def tickers(self):
+        return copy.deepcopy(self._tickers)
+
+    @property
+    def etfs(self):
+        return copy.deepcopy(self._etfs)
