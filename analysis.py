@@ -570,7 +570,7 @@ class History:
             .groupby(by="figi")
             .first()[position]
             .to_dict(),
-            "1d": self._data.loc[self._data.time <= filter_1d, ["figi", position]]
+            "1d": self._data.loc[self._data.time >= filter_1d, ["figi", position]]
             .groupby(by="figi")
             .last()[position]
             .to_dict(),
