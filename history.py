@@ -359,6 +359,7 @@ class History:
             print(f"Updating historical data from {start_date} till {today}")
 
         new_data, tickers = self.get_etfs_daily_history(start=start_date, end=today)
+
         if self.verbose:
             print("Update function received the following new data: ", new_data)
         if new_data is None or new_data.empty:
@@ -382,7 +383,7 @@ class History:
             merged = old_data.append(new_data, verify_integrity=True, ignore_index=True)
             # Convert the time column to time because after merge it changes
             # to object
-            merged.time = pd.to_datetime(self._data.time)
+            merged.time = pd.to_datetime(merged.time)
             self._data = merged
             print(f"History data updated successfully since {start_date}!")
 
