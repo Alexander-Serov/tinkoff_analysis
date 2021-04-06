@@ -20,7 +20,7 @@ class MarketWrapper:
             figi = res[0].figi
         else:
             figi = None
-        return figi
+        return res[0].figi if res else None
 
     @lru_cache(maxsize=1000)
     def get_ticker_for_figi(self, figi):
