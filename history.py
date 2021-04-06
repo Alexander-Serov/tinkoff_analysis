@@ -385,6 +385,9 @@ class History:
                 old_data[old_data.time >= new_data.time.min()].index, inplace=True
             )
 
+            new_data.loc[:, "time"] = new_data["time"].dt.tz_convert(
+                old_data["time"].dt.tz
+            )  # To UTC
             merged = old_data.append(new_data, verify_integrity=True, ignore_index=True)
             # Convert the time column to time because after merge it changes
             # to object
