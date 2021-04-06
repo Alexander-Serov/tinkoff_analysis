@@ -180,8 +180,8 @@ class History:
             except Exception as e:
                 print(e)
                 utils.log_to_file(e)
-                utils.log_to_file("Sleep 5 seconds")
-                time.sleep(5)
+                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
+                time.sleep(utils.SLEEP_TIME)
                 slept = True
 
         if self.verbose:
@@ -254,8 +254,6 @@ class History:
         if all_etfs_history.empty:
             all_etfs_history = one_etf_history
         else:
-            # all_etfs_history = all_etfs_history.merge(one_etf_history,
-            # how='outer', on=['time', 'figi'])
             all_etfs_history = all_etfs_history.append(
                 one_etf_history, ignore_index=True
             )
@@ -464,12 +462,6 @@ class History:
             .to_dict(),
         }
 
-        # print(self._data[self._data.time >= filter_1w].groupby(by='figi'))
-        # print(self._data[self._data.ticker == 'FXUS'].time.unique())
-        # print(max_52w)
-        # current_prices_df = pd.DataFrame.from_dict(current_prices)
-        # print(current_prices_df)
-
         # Combine the calculate_statistics together
         statistics_df = pd.DataFrame(index=figis)
         statistics_df.index.name = "figi"
@@ -493,9 +485,6 @@ class History:
                     / statistics_df[key]
                     * 100
                 )
-
-        # print(statistics_df)
-        # statistics_df.to_csv('tmp.csv')
 
         return statistics_df
 
@@ -582,7 +571,6 @@ class History:
             f"{THRESHOLD_1D_CHG:.2f}):"
         ]
         for figi in statistics_sorted.index:
-            print(figi)
             # filt = statistics_sorted.index == figi
             if (
                 statistics_sorted.loc[figi, "max_52w_chg_percent"]

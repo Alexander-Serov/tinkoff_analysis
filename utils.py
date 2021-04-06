@@ -19,6 +19,8 @@ OBSOLETE_TICKERS = {
     "FXUK": "BBG005HLK5V5",
 }
 
+SLEEP_TIME = 5  # in seconds
+
 logfolder = Path("logs")
 os.makedirs(logfolder, exist_ok=True)
 logfile = logfolder / f"{str(dt.date.today())}.log"
