@@ -80,7 +80,6 @@ class MarketWrapper:
             current_price = payload.close_price
         else:
             order_response = payload.asks[0]
-            # print('debug-1', get_ticker_for_figi(figi), order_response)
             current_price = order_response.price
 
             # TODO not tested
