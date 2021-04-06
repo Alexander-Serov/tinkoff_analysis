@@ -127,7 +127,14 @@ class History:
 
     def _get_all_etfs(self, reload=False):
         if self._etfs is None or reload:
-            self._etfs = self.market.market_etfs_get().payload.instruments
+            downloaded_etfs = self.market.market_etfs_get().payload.instruments
+
+            for etf in downloaded_etfs:
+                if etf.ticker in utils.OBSOLETE_TICKERS.keys():
+                    downloaded_etfs.remove(etf)
+
+            self._etfs = downloaded_etfs
+
         return self._etfs
 
     def get_ticker_history(self, ticker, start, end, interval):
@@ -168,14 +175,12 @@ class History:
                 )
 
                 if slept:
-                    print("LOADED AFTER SLEEP")
+                    utils.log_to_file("LOADED AFTER SLEEP")
                 slept = False
             except Exception as e:
                 print(e)
-                if figi not in utils.OBSOLETE_TICKERS.values():
-                    utils.log_to_file(f"Unable to load history for figi={figi}")
-                    utils.log_to_file(e)
-                print("Sleep 5 seconds")
+                utils.log_to_file(e)
+                utils.log_to_file("Sleep 5 seconds")
                 time.sleep(5)
                 slept = True
 
@@ -469,7 +474,7 @@ class History:
             self.market_wrapper.get_ticker_for_figi
         )
         for key, value in statistics.items():
-            if set(figis) - set(value.keys()) - set(utils.OBSOLETE_TICKERS.values()):
+            if set(figis) - set(value.keys()):
                 warnings.warn(
                     f"Not all figis were found for the column '{key}'."
                     f" The analysis may be incorrect."
@@ -574,6 +579,7 @@ class History:
             f"{THRESHOLD_1D_CHG:.2f}):"
         ]
         for figi in statistics_sorted.index:
+            print(figi)
             # filt = statistics_sorted.index == figi
             if (
                 statistics_sorted.loc[figi, "max_52w_chg_percent"]
