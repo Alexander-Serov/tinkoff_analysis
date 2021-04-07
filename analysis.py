@@ -216,7 +216,7 @@ def get_etfs_history(
         if "ticker" not in one_etf_history.columns:
             one_etf_history["ticker"] = ticker
 
-        # Merge into the large table
+        # Append to the large table
         if all_etfs_history.empty:
             all_etfs_history = one_etf_history
         else:
@@ -455,10 +455,7 @@ class History:
                 try:
                     os.rename(tmp_file, file)
                 except Exception as e:
-                    success = False
                     raise e
-
-        return success
 
     def update(self, reload=False):
         """Fetch the latest price data from server from the last cached date till now.
