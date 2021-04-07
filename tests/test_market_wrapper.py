@@ -1,5 +1,4 @@
 import numpy as np
-from openapi_client import openapi
 from openapi_client.openapi import SandboxOpenApi
 from openapi_genclient import MarketApi
 
@@ -48,5 +47,6 @@ def test_get_current_price():
         assert np.isclose(market.get_current_price(ticker=ticker), figi_price)
 
     # obsolete
-    assert np.isnan(market.get_current_price(ticker="FXJP"))
-    assert np.isnan(market.get_current_price(figi="BBG005HM5979"))
+    ticker, figi = next(iter(OBSOLETE_TICKERS.items()))
+    assert np.isnan(market.get_current_price(ticker=ticker))
+    assert np.isnan(market.get_current_price(figi=figi))
