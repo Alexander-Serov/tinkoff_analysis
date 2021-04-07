@@ -16,10 +16,6 @@ class MarketWrapper:
     @lru_cache(maxsize=1000)
     def get_figi_for_ticker(self, ticker):
         res = self.market.market_search_by_ticker_get(ticker).payload.instruments
-        if res:
-            figi = res[0].figi
-        else:
-            figi = None
         return res[0].figi if res else None
 
     @lru_cache(maxsize=1000)
@@ -34,8 +30,7 @@ class MarketWrapper:
             return None
 
     def get_current_price(self, figi: str = None, ticker: str = None):
-        """
-        If the market is open, return the lowest `ask` price for the given figi.
+        """If the market is open, return the lowest `ask` price for the given figi.
         Otherwise, return the close price of the last trading day.
 
         Note: close price should be used because it correctly represents the last
@@ -43,7 +38,7 @@ class MarketWrapper:
         See: https://www.quora.com/What-is-the-difference-between-last-traded-price-LTP-and-closing-price  # noqa: E501
         This explains the difference with Tinkoff Investment app where the `last_price` is
         shown instead
-        Close price when the market is close was verified.
+        Close price when the market is closed was verified.
         #todo verify current price when the market is open
 
         Parameters
@@ -58,8 +53,7 @@ class MarketWrapper:
         if figi is None:
             if ticker is None:
                 raise ValueError("Either ticker or figi should be provided.")
-            else:
-                figi = self.get_figi_for_ticker(ticker)
+            figi = self.get_figi_for_ticker(ticker)
         elif ticker is not None and self.get_figi_for_ticker(ticker) != figi:
             raise ValueError(
                 f"Ticker and figi point to different products: {figi} "
@@ -82,7 +76,7 @@ class MarketWrapper:
             order_response = payload.asks[0]
             current_price = order_response.price
 
-            # TODO not tested
+            # TODO needs tests
 
         return current_price
 

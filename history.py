@@ -31,7 +31,7 @@ from colorama import Fore
 from tqdm import tqdm
 
 import utils
-from marketWrapper import MarketWrapper
+from market_wrapper import MarketWrapper
 
 
 class History:
