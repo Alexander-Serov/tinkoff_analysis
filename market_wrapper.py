@@ -65,7 +65,7 @@ class MarketWrapper:
 
         return ticker if ticker else None
 
-    def get_current_price(self, figi: str = None, ticker: str = None):  # noqa: C901
+    def get_current_price(self, figi: str = None, ticker: str = None):
         """If the market is open, return the lowest `ask` price for the given figi.
         Otherwise, return the close price of the last trading day.
 
@@ -100,17 +100,12 @@ class MarketWrapper:
             return np.nan
 
         ans = None
-        slept = False
         count = 0
 
         while not ans and count < SLEEP_COUNT:
             count += 1
             try:
                 ans = self.market.market_orderbook_get(figi=figi, depth=1)
-
-                if slept:
-                    utils.log_to_file("LOADED AFTER SLEEP")
-                slept = False
             except ApiException as e:
                 utils.log_to_file(f"Unable to get current price for figi={figi}.")
                 utils.log_to_file(str(e))
@@ -119,7 +114,6 @@ class MarketWrapper:
                 utils.log_to_file(str(e))
                 utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
-                slept = True
 
         if not ans and count >= SLEEP_COUNT:
             return np.nan
