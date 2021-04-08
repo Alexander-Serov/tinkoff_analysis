@@ -6,6 +6,7 @@ from openapi_client import openapi
 from openapi_genclient.exceptions import ApiException
 
 import utils
+from utils import SLEEP_COUNT, SLEEP_TIME
 
 
 class MarketWrapper:
@@ -20,7 +21,7 @@ class MarketWrapper:
         slept = False
         count = 0
 
-        while not res and count < utils.SLEEP_COUNT:
+        while not res and count < SLEEP_COUNT:
             count += 1
             try:
                 ticker_search = self.market.market_search_by_ticker_get(ticker)
@@ -32,8 +33,8 @@ class MarketWrapper:
             except Exception as e:
                 utils.log_to_file(f"Unable to get figi for ticker={ticker}.")
                 utils.log_to_file(str(e))
-                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
-                time.sleep(utils.SLEEP_TIME)
+                utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
+                time.sleep(SLEEP_TIME)
                 slept = True
 
         return res[0].figi if res else None
@@ -47,7 +48,7 @@ class MarketWrapper:
         slept = False
         count = 0
 
-        while not ticker and count < utils.SLEEP_COUNT:
+        while not ticker and count < SLEEP_COUNT:
             count += 1
             try:
                 ticker = self.market.market_search_by_figi_get(figi).payload.ticker
@@ -58,8 +59,8 @@ class MarketWrapper:
             except ApiException as e:
                 utils.log_to_file(f"Unable to get ticker for figi={figi}.")
                 utils.log_to_file(str(e))
-                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
-                time.sleep(utils.SLEEP_TIME)
+                utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
+                time.sleep(SLEEP_TIME)
                 slept = True
 
         return ticker if ticker else None
@@ -102,7 +103,7 @@ class MarketWrapper:
         slept = False
         count = 0
 
-        while not ans and count < utils.SLEEP_COUNT:
+        while not ans and count < SLEEP_COUNT:
             count += 1
             try:
                 ans = self.market.market_orderbook_get(figi=figi, depth=1)
@@ -116,11 +117,11 @@ class MarketWrapper:
 
                 utils.log_to_file(f"Unable to get ticker for figi={figi}.")
                 utils.log_to_file(str(e))
-                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
-                time.sleep(utils.SLEEP_TIME)
+                utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
+                time.sleep(SLEEP_TIME)
                 slept = True
 
-        if not ans and count >= utils.SLEEP_COUNT:
+        if not ans and count >= SLEEP_COUNT:
             return np.nan
 
         payload = ans.payload

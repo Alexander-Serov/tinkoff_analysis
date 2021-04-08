@@ -32,6 +32,13 @@ from tqdm import tqdm
 
 import utils
 from market_wrapper import MarketWrapper
+from utils import (
+    EARLIEST_DATE,
+    LOCAL_TIMEZONE,
+    MOSCOW_TIMEZONE,
+    SLEEP_COUNT,
+    SLEEP_TIME,
+)
 
 
 class History:
@@ -94,7 +101,6 @@ class History:
 
         tmp_data_file = self.data_file.with_suffix(".tmp")
         tmp_tickers_file = self.tickers_file.with_suffix(".tmp")
-        success = False
         # Save to another file
         try:
             data_to_save.to_csv(tmp_data_file, index=False)
@@ -120,7 +126,6 @@ class History:
                 try:
                     os.rename(tmp_file, file)
                 except Exception as e:
-                    success = False
                     raise e
 
         return success
@@ -151,7 +156,9 @@ class History:
         figi = self.market_wrapper.get_figi_for_ticker(ticker)
         return self.get_figi_history(figi, start, end, interval)
 
-    def get_figi_history(self, figi:str, start:datetime, end:datetime, interval: str):
+    def get_figi_history(
+        self, figi: str, start: dt.datetime, end: dt.datetime, interval: str
+    ):
         """
         Get history for a given figi identifier
         :param figi:
@@ -164,7 +171,7 @@ class History:
         slept = False
         count = 0
 
-        while not hist and count < utils.SLEEP_COUNT:
+        while not hist and count < SLEEP_COUNT:
             count += 1
             try:
                 hist = self.market.market_candles_get(
@@ -180,8 +187,8 @@ class History:
                 slept = False
             except Exception as e:
                 utils.log_to_file(e)
-                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
-                time.sleep(utils.SLEEP_TIME)
+                utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
+                time.sleep(SLEEP_TIME)
                 slept = True
 
         if self.verbose:
@@ -232,8 +239,10 @@ class History:
                 figi=figi, start=start, end=end, interval=freq
             )
 
-        if one_etf_history.empty:
-            continue
+            # If could not receive the data after some tries.
+            # The server did not respond or there was no trading
+            if one_etf_history.empty:
+                continue
 
         if not one_etf_history.time.is_unique and freq in ["day"]:
             print(ticker, one_etf_history)
@@ -258,8 +267,8 @@ class History:
 
     def get_etfs_daily_history(
         self,
-        end=dt.datetime.now(utils.MOSCOW_TIMEZONE) - dt.timedelta(days=1),
-        start=dt.datetime.now(utils.MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
+        end=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(days=1),
+        start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
     ):
         """
         Get daily market history (1 point per day) in exactly the requested interval.
@@ -279,9 +288,7 @@ class History:
         # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
         # start = start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        length = end.astimezone(utils.MOSCOW_TIMEZONE) - start.astimezone(
-            utils.MOSCOW_TIMEZONE
-        )
+        length = end.astimezone(MOSCOW_TIMEZONE) - start.astimezone(MOSCOW_TIMEZONE)
         # The server bugs if the time period is smaller than 1 interval
         if length < interval_dt:
             start = end - interval_dt
@@ -328,15 +335,15 @@ class History:
             If False, will use the stored price cache. Otherwise, will reload all
             from the server.
         """
-        today = dt.datetime.now(utils.MOSCOW_TIMEZONE)
+        today = dt.datetime.now(MOSCOW_TIMEZONE)
         # If _data have been loaded, only fetch data starting with the last
         # date in the database
         if self._data.empty or reload:
-            start_date = utils.EARLIEST_DATE
+            start_date = EARLIEST_DATE
             self._etfs = None  # Drop etfs list to reload
         else:
             start_date = (self.last_date - dt.timedelta(days=1)).astimezone(
-                utils.MOSCOW_TIMEZONE
+                MOSCOW_TIMEZONE
             )
 
         if self.verbose:
@@ -403,9 +410,9 @@ class History:
         min_quantile = 1 - max_quantile  # calculate as close quantiles instead of
         # real extremum
 
-        filter_52w = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
-        filter_1w = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
-        filter_1d = dt.datetime.now(utils.LOCAL_TIMEZONE) - dt.timedelta(days=1)
+        filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
+        filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
+        filter_1d = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(days=1)
 
         statistics = {
             "last_price": {
@@ -574,11 +581,6 @@ class History:
 
     @property
     def last_date(self):
-        if not self._data.empty:
-            last_date = self._data.time.max()
-        else:
-            last_date = None
-
         return self._data.time.max() if not self._data.empty else None
 
     @property
