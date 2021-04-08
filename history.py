@@ -169,7 +169,6 @@ class History:
         :return:
         """
         hist = None
-        slept = False
         count = 0
 
         while not hist and count < SLEEP_COUNT:
@@ -183,14 +182,10 @@ class History:
                     # _request_timeout=1000,
                 )
 
-                if slept:
-                    utils.log_to_file("LOADED AFTER SLEEP")
-                slept = False
             except Exception as e:
                 utils.log_to_file(e)
                 utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
-                slept = True
 
         if self.verbose:
             print("Received market response:", hist.payload.candles)

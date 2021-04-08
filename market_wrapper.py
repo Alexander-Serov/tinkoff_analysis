@@ -18,7 +18,6 @@ class MarketWrapper:
     @lru_cache(maxsize=1000)
     def get_figi_for_ticker(self, ticker):
         res = None
-        slept = False
         count = 0
 
         while not res and count < SLEEP_COUNT:
@@ -26,16 +25,11 @@ class MarketWrapper:
             try:
                 ticker_search = self.market.market_search_by_ticker_get(ticker)
                 res = ticker_search.payload.instruments
-
-                if slept:
-                    utils.log_to_file("LOADED AFTER SLEEP")
-                slept = False
             except Exception as e:
                 utils.log_to_file(f"Unable to get figi for ticker={ticker}.")
                 utils.log_to_file(str(e))
                 utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
-                slept = True
 
         return res[0].figi if res else None
 
@@ -45,23 +39,17 @@ class MarketWrapper:
             return None
 
         ticker = None
-        slept = False
         count = 0
 
         while not ticker and count < SLEEP_COUNT:
             count += 1
             try:
                 ticker = self.market.market_search_by_figi_get(figi).payload.ticker
-
-                if slept:
-                    utils.log_to_file("LOADED AFTER SLEEP")
-                slept = False
             except ApiException as e:
                 utils.log_to_file(f"Unable to get ticker for figi={figi}.")
                 utils.log_to_file(str(e))
                 utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
-                slept = True
 
         return ticker if ticker else None
 
