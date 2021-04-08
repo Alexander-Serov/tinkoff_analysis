@@ -151,7 +151,7 @@ class History:
         figi = self.market_wrapper.get_figi_for_ticker(ticker)
         return self.get_figi_history(figi, start, end, interval)
 
-    def get_figi_history(self, figi, start, end, interval):
+    def get_figi_history(self, figi:str, start:datetime, end:datetime, interval: str):
         """
         Get history for a given figi identifier
         :param figi:
