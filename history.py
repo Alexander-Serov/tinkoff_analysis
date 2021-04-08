@@ -285,10 +285,6 @@ class History:
             f"Requesting ETF history from {start} till {end} with an interval={interval}"
         )
 
-        # For daily forecasts drop hours
-        # end = end.replace(hour=0, minute=0, second=0,microsecond=0)
-        # start = start.replace(hour=0, minute=0, second=0, microsecond=0)
-
         length = end.astimezone(MOSCOW_TIMEZONE) - start.astimezone(MOSCOW_TIMEZONE)
         # The server bugs if the time period is smaller than 1 interval
         if length < interval_dt:
