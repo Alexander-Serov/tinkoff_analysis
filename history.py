@@ -579,7 +579,7 @@ class History:
         else:
             last_date = None
 
-        return last_date
+        return self._data.time.max() if not self._data.empty else None
 
     @property
     def data(self):
