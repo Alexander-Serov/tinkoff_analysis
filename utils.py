@@ -20,6 +20,7 @@ OBSOLETE_TICKERS = {
 }
 
 SLEEP_TIME = 5  # in seconds
+SLEEP_COUNT = 10
 
 logfolder = Path("logs")
 os.makedirs(logfolder, exist_ok=True)

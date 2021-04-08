@@ -160,11 +160,12 @@ class History:
         :param interval:
         :return:
         """
-        df = pd.DataFrame()
         hist = None
         slept = False
+        count = 0
 
-        while not hist:
+        while not hist and count < utils.SLEEP_COUNT:
+            count += 1
             try:
                 hist = self.market.market_candles_get(
                     figi=figi,
@@ -178,7 +179,6 @@ class History:
                     utils.log_to_file("LOADED AFTER SLEEP")
                 slept = False
             except Exception as e:
-                print(e)
                 utils.log_to_file(e)
                 utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
                 time.sleep(utils.SLEEP_TIME)
@@ -215,7 +215,6 @@ class History:
         list
             List of ETF tickers.
         """
-        # print('C1', start, end)
         tickers = []
         etfs = self._get_all_etfs()
         all_etfs_history = pd.DataFrame()
@@ -224,14 +223,11 @@ class History:
             ticker = etf.ticker
             tickers.append(ticker)
 
-            # print(etf, figi, ticker)
-
             if self.verbose:
                 print(
                     f"Getting ETF history for figi={figi} from {start} till {end},"
                     f" interval={freq}."
                 )
-            # print(i, end=" ")
             one_etf_history = self.get_figi_history(
                 figi=figi, start=start, end=end, interval=freq
             )
@@ -315,21 +311,6 @@ class History:
             dfs.append(df)
         if dfs:
             out = pd.concat(dfs, axis=0, ignore_index=True)
-
-        # if len(out) < (end-start) / dt.timedelta(days=1):
-        #     warnings.warn(f'Server returned fewer days than expected: {len(out)} v.
-        #     {(end-start) / dt.timedelta(days=1)}',
-        #                   RuntimeWarning)
-
-        # Drop all _data points after the end date (because the API does not return exactly
-        # what was requested)
-        # inds = out[out.time > end]
-        # if len(inds) > 0:
-        #     out.drop(inds.index, inplace=True)
-
-        # Drop nans in time
-        # print(out[pd.isna(out.time)])
-        # print(out.tail(1))
 
         l1 = len(out)
         out.drop(out[pd.isna(out.time)].index, inplace=True)
@@ -456,7 +437,7 @@ class History:
             .groupby(by="figi")
             .first()[position]
             .to_dict(),
-            "1d": self._data.loc[self._data.time >= filter_1d, ["figi", position]]
+            "1d": self._data.loc[self._data.time <= filter_1d, ["figi", position]]
             .groupby(by="figi")
             .last()[position]
             .to_dict(),
@@ -468,6 +449,7 @@ class History:
         statistics_df["ticker"] = statistics_df.index.map(
             self.market_wrapper.get_ticker_for_figi
         )
+
         for key, value in statistics.items():
             if set(figis) - set(value.keys()):
                 warnings.warn(

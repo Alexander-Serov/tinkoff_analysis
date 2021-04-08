@@ -1,3 +1,4 @@
+import time
 from functools import lru_cache
 
 import numpy as np
@@ -15,21 +16,55 @@ class MarketWrapper:
 
     @lru_cache(maxsize=1000)
     def get_figi_for_ticker(self, ticker):
-        res = self.market.market_search_by_ticker_get(ticker).payload.instruments
+        res = None
+        slept = False
+        count = 0
+
+        while not res and count < utils.SLEEP_COUNT:
+            count += 1
+            try:
+                ticker_search = self.market.market_search_by_ticker_get(ticker)
+                res = ticker_search.payload.instruments
+
+                if slept:
+                    utils.log_to_file("LOADED AFTER SLEEP")
+                slept = False
+            except Exception as e:
+                utils.log_to_file(f"Unable to get figi for ticker={ticker}.")
+                utils.log_to_file(str(e))
+                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
+                time.sleep(utils.SLEEP_TIME)
+                slept = True
+
         return res[0].figi if res else None
 
     @lru_cache(maxsize=1000)
     def get_ticker_for_figi(self, figi):
         if figi in utils.OBSOLETE_TICKERS.values():
             return None
-        try:
-            return self.market.market_search_by_figi_get(figi).payload.ticker
-        except ApiException as e:
-            utils.log_to_file(f"Unable to get ticker for figi={figi}.")
-            utils.log_to_file(str(e))
-            return None
 
-    def get_current_price(self, figi: str = None, ticker: str = None):
+        ticker = None
+        slept = False
+        count = 0
+
+        while not ticker and count < utils.SLEEP_COUNT:
+            count += 1
+            try:
+                ticker = self.market.market_search_by_figi_get(figi).payload.ticker
+
+                if slept:
+                    utils.log_to_file("LOADED AFTER SLEEP")
+                slept = False
+            except ApiException as e:
+                utils.log_to_file(f"Unable to get ticker for figi={figi}.")
+                utils.log_to_file(str(e))
+                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
+                time.sleep(utils.SLEEP_TIME)
+                slept = True
+
+        return ticker if ticker else None
+
+    def get_current_price(self, figi: str = None, ticker: str = None):  # noqa: C901
         """If the market is open, return the lowest `ask` price for the given figi.
         Otherwise, return the close price of the last trading day.
 
@@ -63,12 +98,31 @@ class MarketWrapper:
         if figi in utils.OBSOLETE_TICKERS.values() or figi is None:
             return np.nan
 
-        try:
-            ans = self.market.market_orderbook_get(figi=figi, depth=1)
-        except ApiException as e:
-            utils.log_to_file(f"Unable to get current price for figi={figi}.")
-            utils.log_to_file(str(e))
+        ans = None
+        slept = False
+        count = 0
+
+        while not ans and count < utils.SLEEP_COUNT:
+            count += 1
+            try:
+                ans = self.market.market_orderbook_get(figi=figi, depth=1)
+
+                if slept:
+                    utils.log_to_file("LOADED AFTER SLEEP")
+                slept = False
+            except ApiException as e:
+                utils.log_to_file(f"Unable to get current price for figi={figi}.")
+                utils.log_to_file(str(e))
+
+                utils.log_to_file(f"Unable to get ticker for figi={figi}.")
+                utils.log_to_file(str(e))
+                utils.log_to_file(f"Sleep {utils.SLEEP_TIME} seconds")
+                time.sleep(utils.SLEEP_TIME)
+                slept = True
+
+        if not ans and count >= utils.SLEEP_COUNT:
             return np.nan
+
         payload = ans.payload
         if payload.trade_status == "NotAvailableForTrading":
             current_price = payload.close_price
