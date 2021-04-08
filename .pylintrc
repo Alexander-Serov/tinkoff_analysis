@@ -1,0 +1,62 @@
+# See https://github.com/PyCQA/pylint/blob/master/pylintrc for possible options
+
+[MASTER]
+extension-pkg-whitelist=lxml,wand
+max-line-length=88
+init-hook="from pylint.config import find_pylintrc;import os, sys; sys.path.append(os.path.dirname(find_pylintrc()))"
+disable=
+    missing-docstring,
+    no-name-in-module,
+    too-few-public-methods, # Lot of classes can validly have only one method
+    invalid-name, # Too many problem with this right now
+    logging-fstring-interpolation,
+    logging-not-lazy,
+    too-many-arguments,
+    too-many-locals,
+    arguments-differ,
+    consider-using-enumerate,
+    inconsistent-return-statements,
+    duplicate-code,
+    unused-argument,
+    too-many-branches,
+    eval-used,
+    isinstance-second-argument-not-valid-type,
+    unreachable,
+    protected-access,
+    self-assigning-variable,
+    too-many-instance-attributes,
+    global-statement,
+    attribute-defined-outside-init,
+    too-many-return-statements,
+    broad-except,
+    consider-using-in,
+    raise-missing-from,
+    no-else-raise,
+    no-else-break,
+    no-else-return,
+    singleton-comparison,
+    redefined-builtin,
+    simplifiable-if-expression,
+    using-constant-test,
+    unused-variable,
+    consider-merging-isinstance,
+    fixme,
+    consider-merging-isinstance,
+    no-self-use,
+    abstract-method,
+    logging-format-interpolation,
+    too-many-lines,
+    too-many-public-methods,
+    redefined-outer-name
+
+
+[BASIC]
+
+# Good variable names which should always be accepted, separated by a comma
+good-names=i,j,k,e,f,id,_,x,y,z
+
+# Regular expression matching correct method names
+# Pylint do not complain for setUp and other if it
+# detects that we inherit from unittest.TestCase
+# But that's not always possible to detect.
+method-rgx=[a-z_][a-z0-9_]{2,30}$|setUp(Class)?|tearDown(Class)?

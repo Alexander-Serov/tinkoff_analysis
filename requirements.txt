@@ -1,0 +1,6 @@
+pandas
+matplotlib
+colorama
+numpy
+pytz
+tqdm
