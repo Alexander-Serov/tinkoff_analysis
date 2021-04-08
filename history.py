@@ -28,6 +28,7 @@ from typing import List, Tuple
 
 import pandas as pd
 from colorama import Fore
+from pytz import UTC
 from tqdm import tqdm
 
 import utils
@@ -371,9 +372,7 @@ class History:
                 old_data[old_data.time >= new_data.time.min()].index, inplace=True
             )
 
-            new_data.loc[:, "time"] = new_data["time"].dt.tz_convert(
-                old_data["time"].dt.tz
-            )  # To UTC
+            new_data["time"] = new_data["time"].dt.tz_convert(UTC)
             merged = old_data.append(new_data, verify_integrity=True, ignore_index=True)
             # Convert the time column to time because after merge it changes
             # to object
@@ -434,11 +433,11 @@ class History:
             .to_dict(),
             "max_1w": self._data.loc[self._data.time >= filter_1w, ["figi", "h"]]
             .groupby(by="figi")
-            .quantile(max_quantile)["h"]
+            .quantile(1)["h"]
             .to_dict(),
             "min_1w": self._data.loc[self._data.time >= filter_1w, ["figi", "l"]]
             .groupby(by="figi")
-            .quantile(min_quantile)["l"]
+            .quantile(0)["l"]
             .to_dict(),
             "1w": self._data.loc[self._data.time >= filter_1w, ["figi", position]]
             .groupby(by="figi")

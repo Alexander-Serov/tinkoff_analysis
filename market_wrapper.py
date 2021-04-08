@@ -119,7 +119,7 @@ class MarketWrapper:
             return np.nan
 
         payload = ans.payload
-        if payload.trade_status == "NotAvailableForTrading":
+        if payload.trade_status == "NotAvailableForTrading" or not payload.asks:
             current_price = payload.close_price
         else:
             order_response = payload.asks[0]
