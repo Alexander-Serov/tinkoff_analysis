@@ -452,10 +452,7 @@ class History:
 
         for key, value in statistics.items():
             if set(figis) - set(value.keys()):
-                warnings.warn(
-                    f"Not all figis were found for the column '{key}'."
-                    f" The analysis may be incorrect."
-                )
+                warnings.warn(f"Not all figis were found for the column '{key}'.")
             statistics_df[key] = statistics_df.index.map(value)
             if key != "last_price":
                 statistics_df[key + "_chg"] = (
@@ -510,7 +507,6 @@ class History:
             f"{THRESHOLD_1W_CHG:.2f} %):"
         ]
         for figi in statistics_sorted.index:
-            # filt = statistics_sorted.index == figi
             if (
                 statistics_sorted.loc[figi, "max_52w_chg_percent"]
                 <= THRESHOLD_MAX_52W_CHG_PERCENT
@@ -553,7 +549,6 @@ class History:
             f"{THRESHOLD_1D_CHG:.2f}):"
         ]
         for figi in statistics_sorted.index:
-            # filt = statistics_sorted.index == figi
             if (
                 statistics_sorted.loc[figi, "max_52w_chg_percent"]
                 <= THRESHOLD_MAX_52W_CHG_PERCENT

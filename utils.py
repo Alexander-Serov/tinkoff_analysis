@@ -10,8 +10,6 @@ import pytz
 LOCAL_TIMEZONE = dt.datetime.now(dt.timezone.utc).astimezone().tzinfo
 MOSCOW_TIMEZONE = pytz.timezone("Europe/Moscow")
 EARLIEST_DATE = dt.datetime.fromisoformat("2013-01-01").replace(tzinfo=MOSCOW_TIMEZONE)
-# TODO: In the received results, Moscow timezone sometimes appears as +2:30 and
-#  sometimes as +3:00. To fix
 
 OBSOLETE_TICKERS = {
     "FXJP": "BBG005HM5979",
