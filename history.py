@@ -202,21 +202,21 @@ class History:
     ) -> Tuple[pd.DataFrame, List[str]]:
         """Get history _data with a given interval for all available ETFs.
 
-    Parameters
-    ----------
-    end
-        End of the time frame for which to get history.
-    start
-        Start of the time string for which to return history.
-    freq
-        Frequency of the returned values.
+        Parameters
+        ----------
+        end
+            End of the time frame for which to get history.
+        start
+            Start of the time string for which to return history.
+        freq
+            Frequency of the returned values.
 
-        Returns
-        -------
-        pd.DataFrame
-            A dataframe with historical values of all ETFs.
-        list
-            List of ETF tickers.
+            Returns
+            -------
+            pd.DataFrame
+                A dataframe with historical values of all ETFs.
+            list
+                List of ETF tickers.
         """
         tickers = []
         etfs = self._get_all_etfs()
@@ -240,24 +240,24 @@ class History:
             if one_etf_history.empty:
                 continue
 
-        if not one_etf_history.time.is_unique and freq in ["day"]:
-            print(ticker, one_etf_history)
-            raise ValueError(
-                f"Received time stamps are not unique for "
-                f"ticker={ticker} and period=[{start}, {end}]"
-            )
+            if not one_etf_history.time.is_unique and freq in ["day"]:
+                print(ticker, one_etf_history)
+                raise ValueError(
+                    f"Received time stamps are not unique for "
+                    f"ticker={ticker} and period=[{start}, {end}]"
+                )
 
-        one_etf_history.drop(columns=["interval"], inplace=True)
-        if "ticker" not in one_etf_history.columns:
-            one_etf_history["ticker"] = ticker
+            one_etf_history.drop(columns=["interval"], inplace=True)
+            if "ticker" not in one_etf_history.columns:
+                one_etf_history["ticker"] = ticker
 
-        # Append to the large table
-        if all_etfs_history.empty:
-            all_etfs_history = one_etf_history
-        else:
-            all_etfs_history = all_etfs_history.append(
-                one_etf_history, ignore_index=True
-            )
+            # Append to the large table
+            if all_etfs_history.empty:
+                all_etfs_history = one_etf_history
+            else:
+                all_etfs_history = all_etfs_history.append(
+                    one_etf_history, ignore_index=True
+                )
 
         return all_etfs_history, tickers
 
@@ -354,6 +354,7 @@ class History:
 
         self._tickers = tickers
         if self._data.empty or reload:
+            new_data["time"] = new_data["time"].dt.tz_convert(UTC)
             self._data = new_data
         else:
             """Drop all data from the original table that repeats in the new
