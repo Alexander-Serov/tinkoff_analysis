@@ -1,26 +1,24 @@
 import time
-from functools import lru_cache
 
 import numpy as np
 from openapi_client import openapi
 from openapi_genclient.exceptions import ApiException
 
 import utils
-from utils import SLEEP_COUNT, SLEEP_TIME
+from utils import SLEEP_TIME, SLEEP_TRIES
 
 
-class MarketWrapper:
+class Market:
     def __init__(self, token=utils.TOKEN):
         self._token = token
         self._client = openapi.sandbox_api_client(self._token)  # Initialize the openapi
         self._market = self.client.market
 
-    @lru_cache(maxsize=1000)
     def get_figi_for_ticker(self, ticker):
         res = None
         count = 0
 
-        while not res and count < SLEEP_COUNT:
+        while not res and count < SLEEP_TRIES:
             count += 1
             try:
                 ticker_search = self.market.market_search_by_ticker_get(ticker)
@@ -33,16 +31,15 @@ class MarketWrapper:
 
         return res[0].figi if res else None
 
-    @lru_cache(maxsize=1000)
     def get_ticker_for_figi(self, figi):
         if figi in utils.OBSOLETE_TICKERS.values():
             return None
 
         ticker = None
-        count = 0
+        try_ = 0
 
-        while not ticker and count < SLEEP_COUNT:
-            count += 1
+        while not ticker and try_ < SLEEP_TRIES:
+            try_ += 1
             try:
                 ticker = self.market.market_search_by_figi_get(figi).payload.ticker
             except ApiException as e:
@@ -90,7 +87,7 @@ class MarketWrapper:
         ans = None
         count = 0
 
-        while not ans and count < SLEEP_COUNT:
+        while not ans and count < SLEEP_TRIES:
             count += 1
             try:
                 ans = self.market.market_orderbook_get(figi=figi, depth=1)
@@ -103,7 +100,7 @@ class MarketWrapper:
                 utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
 
-        if not ans and count >= SLEEP_COUNT:
+        if not ans and count >= SLEEP_TRIES:
             return np.nan
 
         payload = ans.payload
@@ -124,3 +121,14 @@ class MarketWrapper:
     @property
     def market(self):
         return self._market
+
+    def get_all_etfs(self):
+        etfs = self._market.market_etfs_get().payload.instruments
+        for etf in etfs:
+            if etf.ticker in utils.OBSOLETE_TICKERS.keys():
+                etfs.remove(etf)
+
+        return etfs
+
+    def get_candles(self, figi, _from, to, interval, **kwargs):
+        return self._market.market_candles_get(figi, _from, to, interval, **kwargs)

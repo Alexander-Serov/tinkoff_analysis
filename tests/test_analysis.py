@@ -11,9 +11,7 @@ def test_get_figi_history():
     interval = "day"
     figi = "BBG005HLTYH9"  # FXIT
 
-    hist = History()
-
-    res = hist.get_figi_history(start=start, end=end, interval=interval, figi=figi)
+    res = History().get_figi_history(start=start, end=end, interval=interval, figi=figi)
     assert not res.empty
     assert (
         (res["time"].dt.date >= start.date()) & (res["time"].dt.date <= end.date())

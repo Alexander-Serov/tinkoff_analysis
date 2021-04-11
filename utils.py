@@ -1,7 +1,6 @@
 import datetime as dt
 import inspect
 import os
-import pathlib
 from pathlib import Path
 
 import colorama
@@ -18,7 +17,7 @@ OBSOLETE_TICKERS = {
 }
 
 SLEEP_TIME = 5  # in seconds
-SLEEP_COUNT = 10
+SLEEP_TRIES = 10
 
 logfolder = Path("logs")
 os.makedirs(logfolder, exist_ok=True)
@@ -27,8 +26,8 @@ logfile = logfolder / f"{str(dt.date.today())}.log"
 colorama.init()
 
 # Load the token
-MAIN_FOLDER = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
-token_file = MAIN_FOLDER / "./token_sandbox"
+MAIN_FOLDER = Path(__file__).parent
+token_file = MAIN_FOLDER / "token_sandbox"
 with open(token_file, "r") as f:
     TOKEN = f.read().strip()
 
@@ -44,5 +43,5 @@ def log_to_file(*args):
                 f.write(str(arg))
             f.write("\n\n")
     except Exception:
-        print("Unable to save the following thing to log:")
+        print("Unable to save the following thing to the log:")
         print(args)

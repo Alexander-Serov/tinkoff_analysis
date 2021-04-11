@@ -31,14 +31,15 @@ from colorama import Fore
 from pytz import UTC
 from tqdm import tqdm
 
-import utils
-from market_wrapper import MarketWrapper
+from market import Market
 from utils import (
     EARLIEST_DATE,
     LOCAL_TIMEZONE,
+    MAIN_FOLDER,
     MOSCOW_TIMEZONE,
-    SLEEP_COUNT,
     SLEEP_TIME,
+    SLEEP_TRIES,
+    log_to_file,
 )
 
 
@@ -46,9 +47,8 @@ class History:
     """
     A set of functions to download, update and locally store the history of all provided
     ETFs.
-    By default, only the _data up to now is stored. Today's _data is always incomplete,
-    so the last day in the recorded
-    data is always updated.
+    By default, only the data up to now are stored. Today's data are always incomplete,
+    so the last day in the recorded data is always updated.
 
     Usage:
     History().update() # to update the local database of prices
@@ -56,24 +56,21 @@ class History:
     and a trackers list
     """
 
-    def __init__(self, interval="day", market_wrapper=MarketWrapper(), verbose=False):
+    def __init__(self, interval="day", market_wrapper: Market = None, verbose=False):
         self._data = pd.DataFrame()
         self._tickers = []
         self._etfs = None
 
-        self.market_wrapper = market_wrapper
-        self.market = self.market_wrapper.market
+        self.market = Market() if market_wrapper is None else market_wrapper
         self.interval = interval
-        self.data_file = utils.MAIN_FOLDER / f"ETFs_history_i={interval}.csv"
-        self.tickers_file = utils.MAIN_FOLDER / f"tickers_i={interval}.dat"
+        self.data_file = MAIN_FOLDER / f"ETFs_history_i={interval}.csv"
+        self.tickers_file = MAIN_FOLDER / f"tickers_i={interval}.dat"
         self.verbose = verbose
 
         # Update
         self._load_data()
 
     def _load_data(self):
-        loaded = False
-        # print('Loading local history _data...')
         try:
             self._data = pd.read_csv(self.data_file)
 
@@ -81,17 +78,14 @@ class History:
             l1 = len(self._data)
             self._data.drop(self._data[pd.isna(self._data.time)].index, inplace=True)
             if len(self._data) < l1:
-                utils.log_to_file(f"{l1 - len(self._data)} NaN time stamps dropped.")
+                log_to_file(f"{l1 - len(self._data)} NaN time stamps dropped.")
 
             self._data.time = pd.to_datetime(self._data.time)
             with open(self.tickers_file, "r") as f:
                 self._tickers = f.read().split()
-            loaded = True
+            print("Local history data loaded successfully")
         except FileNotFoundError:
             print("No saved ETF history found locally.")
-        if loaded:
-            print("Local history data loaded successfully")
-        return loaded
 
     def _save_data(self):
         # Do not save nan time
@@ -102,46 +96,30 @@ class History:
 
         tmp_data_file = self.data_file.with_suffix(".tmp")
         tmp_tickers_file = self.tickers_file.with_suffix(".tmp")
-        # Save to another file
+        # Save to the tmp file
         try:
             data_to_save.to_csv(tmp_data_file, index=False)
             with open(tmp_tickers_file, "w") as f:
                 for ticker in self._tickers:
                     f.write(ticker + "\n")
-            success = True
         except Exception as e:
             print("Unable to save ETFs history")
             raise e
 
         # Replace the original files
-        if success:
-            for tmp_file, file in [
-                (tmp_data_file, self.data_file),
-                (tmp_tickers_file, self.tickers_file),
-            ]:
-                try:
-                    os.unlink(file)
-                except FileNotFoundError:
-                    pass
+        for tmp_file, file in [
+            (tmp_data_file, self.data_file),
+            (tmp_tickers_file, self.tickers_file),
+        ]:
+            try:
+                os.unlink(file)
+            except FileNotFoundError:
+                pass
 
-                try:
-                    os.rename(tmp_file, file)
-                except Exception as e:
-                    raise e
-
-        return success
-
-    def _get_all_etfs(self, reload=False):
-        if self._etfs is None or reload:
-            downloaded_etfs = self.market.market_etfs_get().payload.instruments
-
-            for etf in downloaded_etfs:
-                if etf.ticker in utils.OBSOLETE_TICKERS.keys():
-                    downloaded_etfs.remove(etf)
-
-            self._etfs = downloaded_etfs
-
-        return self._etfs
+            try:
+                os.rename(tmp_file, file)
+            except Exception as e:
+                raise e
 
     def get_ticker_history(self, ticker, start, end, interval):
         """
@@ -154,7 +132,7 @@ class History:
         :return:
         """
 
-        figi = self.market_wrapper.get_figi_for_ticker(ticker)
+        figi = self.market.get_figi_for_ticker(ticker)
         return self.get_figi_history(figi, start, end, interval)
 
     def get_figi_history(
@@ -171,20 +149,19 @@ class History:
         hist = None
         count = 0
 
-        while not hist and count < SLEEP_COUNT:
+        while not hist and count < SLEEP_TRIES:
             count += 1
             try:
-                hist = self.market.market_candles_get(
+                hist = self.market.get_candles(
                     figi=figi,
                     _from=start.isoformat(),
                     to=end.isoformat(),
                     interval=interval,
-                    # _request_timeout=1000,
                 )
 
             except Exception as e:
-                utils.log_to_file(e)
-                utils.log_to_file(f"Sleep {SLEEP_TIME} seconds")
+                log_to_file(e)
+                log_to_file(f"Sleep {SLEEP_TIME} seconds")
                 time.sleep(SLEEP_TIME)
 
         if self.verbose:
@@ -219,7 +196,7 @@ class History:
                 List of ETF tickers.
         """
         tickers = []
-        etfs = self._get_all_etfs()
+        etfs = self.market.get_all_etfs()
         all_etfs_history = pd.DataFrame()
         for i, etf in enumerate(etfs):
             figi = etf.figi
@@ -236,7 +213,7 @@ class History:
             )
 
             # If could not receive the data after some tries.
-            # The server did not respond or there was no trading
+            # (e.g. the server did not respond or there was no trading)
             if one_etf_history.empty:
                 continue
 
@@ -267,11 +244,11 @@ class History:
         start=dt.datetime.now(MOSCOW_TIMEZONE) - dt.timedelta(weeks=52, days=1),
     ):
         """
-        Get daily market history (1 point per day) in exactly the requested interval.
+        Get daily market history (1 point per day) with exactly the requested interval.
 
         Note:
-        Due to API restrictions, an interval longer than a year must be divided into years
-        when fetched
+        Due to API restrictions, an interval longer than a year must be divided into
+        years when fetched
         """
 
         interval = "day"
@@ -314,7 +291,7 @@ class History:
         l1 = len(out)
         out.drop(out[pd.isna(out.time)].index, inplace=True)
         if len(out) < l1:
-            utils.log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
+            log_to_file(f"{l1 - len(out)} NaN time stamps dropped.")
 
         return out, tickers
 
@@ -398,17 +375,15 @@ class History:
         """
         figis = self._data.figi.unique()
         max_quantile = 0.99  # to make extrema calculations more robust to outliers,
-        min_quantile = 1 - max_quantile  # calculate as close quantiles instead of
-        # real extremum
+        # calculate as close quantiles instead of real extremum
+        min_quantile = 1 - max_quantile
 
         filter_52w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=52)
         filter_1w = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(weeks=1)
         filter_1d = dt.datetime.now(LOCAL_TIMEZONE) - dt.timedelta(days=1)
 
         statistics = {
-            "last_price": {
-                figi: self.market_wrapper.get_current_price(figi) for figi in figis
-            },
+            "last_price": {figi: self.market.get_current_price(figi) for figi in figis},
             "max_52w": self._data.loc[self._data.time >= filter_52w, ["figi", "h"]]
             .groupby(by="figi")
             .quantile(max_quantile)["h"]
@@ -445,7 +420,7 @@ class History:
         statistics_df = pd.DataFrame(index=figis)
         statistics_df.index.name = "figi"
         statistics_df["ticker"] = statistics_df.index.map(
-            self.market_wrapper.get_ticker_for_figi
+            self.market.get_ticker_for_figi
         )
 
         for key, value in statistics.items():

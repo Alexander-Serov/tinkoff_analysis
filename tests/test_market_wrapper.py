@@ -2,7 +2,7 @@ import numpy as np
 from openapi_client.openapi import SandboxOpenApi
 from openapi_genclient import MarketApi
 
-from market_wrapper import MarketWrapper
+from market import Market
 from utils import OBSOLETE_TICKERS
 
 tickers_for_tests = {
@@ -11,7 +11,7 @@ tickers_for_tests = {
     "FXIT": "BBG005HLTYH9",
 }
 
-market = MarketWrapper()
+market = Market()
 
 
 def test_get_figi_for_ticker():
