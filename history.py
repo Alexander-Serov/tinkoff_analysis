@@ -1,23 +1,3 @@
-"""
-Support functions for the main interface.
-
-Candle limits:
-// Получение свечей(ордеров)
-// Внимание! Действуют ограничения на промежуток и доступный размер свечей за него
-// Интервал свечи и допустимый промежуток запроса:
-// - 1min [1 minute, 1 day]
-// - 2min [2 minutes, 1 day]
-// - 3min [3 minutes, 1 day]
-// - 5min [5 minutes, 1 day]
-// - 10min [10 minutes, 1 day]
-// - 15min [15 minutes, 1 day]
-// - 30min [30 minutes, 1 day]
-// - hour [1 hour, 7 days]
-// - day [1 day, 1 year]
-// - week [7 days, 2 years]
-// - month [1 month, 10 years]
-"""
-
 import copy
 import datetime as dt
 import math
