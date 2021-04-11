@@ -440,12 +440,12 @@ class History:
 
         return statistics_df
 
-    def recommend_simple(self, update: bool = True, _print=False, reload=False):
+    def recommend_simple(self, update: bool = True, verbose=False, reload=False):
         if update:
             self.update(reload=reload)
         statistics_df = self.calculate_statistics()
 
-        if _print:
+        if verbose:
             print()
             statistics_df_sorted = statistics_df.sort_values("max_52w_chg_percent")
             with pd.option_context("precision", 2):
