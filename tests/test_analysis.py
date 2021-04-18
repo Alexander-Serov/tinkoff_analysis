@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pytz import utc
 
-from analysis import get_figi_history
+from history import History
 
 
 def test_get_figi_history():
@@ -11,7 +11,7 @@ def test_get_figi_history():
     interval = "day"
     figi = "BBG005HLTYH9"  # FXIT
 
-    res = get_figi_history(start=start, end=end, interval=interval, figi=figi)
+    res = History().get_figi_history(start=start, end=end, interval=interval, figi=figi)
     assert not res.empty
     assert (
         (res["time"].dt.date >= start.date()) & (res["time"].dt.date <= end.date())
