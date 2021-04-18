@@ -66,8 +66,8 @@ def test_get_all_etfs():
 
 
 def test_get_candles():
-    date_1 = dt.datetime.strptime("2020-09-09", "%Y-%m-%d").astimezone(MOSCOW_TIMEZONE)
-    date_2 = dt.datetime.strptime("2017-12-08", "%Y-%m-%d").astimezone(MOSCOW_TIMEZONE)
+    date_1 = MOSCOW_TIMEZONE.localize(dt.datetime(2020, 9, 9))
+    date_2 = MOSCOW_TIMEZONE.localize(dt.datetime(2017, 12, 8))
 
     start_end_interval = [
         # interval = day
@@ -106,13 +106,8 @@ def test_get_candles():
             ).payload.candles
 
             assert isinstance(candles, list)
-
             if candles:
                 assert candles[0].interval == st_end_int["interval"]
-
                 for candle in candles:
-                    assert 0 < candle.c < np.inf
-                    assert 0 < candle.h < np.inf
-                    assert 0 < candle.l < np.inf
-                    assert 0 < candle.o < np.inf
-                    assert 0 < candle.v < np.inf
+                    for atr in ["c", "h", "l", "o", "v"]:
+                        assert 0 < getattr(candle, atr) < np.inf
